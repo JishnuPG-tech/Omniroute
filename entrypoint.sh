@@ -415,10 +415,13 @@ echo "[BOOT] Background services starting asynchronously..."
     fi
 
 # Step 9: Start Telegram Range Stream Proxy in Background (Port 8080)
-if [ -f "/tg_streamer.py" ]; then
+# Optional: disabled by default to keep cpu-basic RAM/CPU for the chat path.
+if [ "${ENABLE_TG_STREAMER:-0}" = "1" ] && [ -f "/tg_streamer.py" ]; then
     echo "[HEALTH] Telegram streamer starting in background..."
     python3 /tg_streamer.py > /data/cache/tg_streamer.log 2>&1 &
     TG_PID=$!
+else
+    echo "[INIT] Telegram streamer disabled (ENABLE_TG_STREAMER!=1)"
 fi
 
 if [ -f "/health_doctor.py" ]; then
@@ -427,23 +430,30 @@ if [ -f "/health_doctor.py" ]; then
 fi
 
 # Step 10: Start Jellyfin Media Server in Background (Port 8096)
+# Optional: disabled by default — Jellyfin media scans starve OmniRoute on
+# cpu-basic and cause multi-minute "Service initializing" windows.
 WEBDIR_OPT=""
 if [ -d "/usr/share/jellyfin/web" ]; then
     WEBDIR_OPT="--webdir /usr/share/jellyfin/web"
 fi
 
-if command -v jellyfin >/dev/null 2>&1; then
-    echo "[HEALTH] Jellyfin starting in background..."
-    jellyfin --datadir /data/jellyfin/data --configdir /data/jellyfin/config --cachedir /data/jellyfin/cache --logdir /data/jellyfin/log $WEBDIR_OPT > /data/jellyfin/log/jellyfin.log 2>&1 &
-    JELLYFIN_PID=$!
-elif [ -f "/usr/bin/jellyfin" ]; then
-    echo "[HEALTH] Jellyfin binary starting in background..."
-    /usr/bin/jellyfin --datadir /data/jellyfin/data --configdir /data/jellyfin/config --cachedir /data/jellyfin/cache --logdir /data/jellyfin/log $WEBDIR_OPT > /data/jellyfin/log/jellyfin.log 2>&1 &
-    JELLYFIN_PID=$!
+if [ "${ENABLE_JELLYFIN:-0}" = "1" ]; then
+    if command -v jellyfin >/dev/null 2>&1; then
+        echo "[HEALTH] Jellyfin starting in background..."
+        jellyfin --datadir /data/jellyfin/data --configdir /data/jellyfin/config --cachedir /data/jellyfin/cache --logdir /data/jellyfin/log $WEBDIR_OPT > /data/jellyfin/log/jellyfin.log 2>&1 &
+        JELLYFIN_PID=$!
+    elif [ -f "/usr/bin/jellyfin" ]; then
+        echo "[HEALTH] Jellyfin binary starting in background..."
+        /usr/bin/jellyfin --datadir /data/jellyfin/data --configdir /data/jellyfin/config --cachedir /data/jellyfin/cache --logdir /data/jellyfin/log $WEBDIR_OPT > /data/jellyfin/log/jellyfin.log 2>&1 &
+        JELLYFIN_PID=$!
+    fi
+else
+    echo "[INIT] Jellyfin disabled (ENABLE_JELLYFIN!=1)"
 fi
 
 # Step 11: Start Open WebUI in Background (Port 8098)
-if command -v open-webui >/dev/null 2>&1; then
+# Optional: disabled by default — OpenWebUI is the heaviest boot component.
+if [ "${ENABLE_OPENWEBUI:-0}" = "1" ] && command -v open-webui >/dev/null 2>&1; then
     echo "[HEALTH] Open WebUI starting in background on port 8098..."
     mkdir -p /root/.open-webui /data/open-webui /data/cache 2>/dev/null || true
     if [ -f "/data/open-webui/webui.db" ] && ! [ -s "/data/open-webui/webui.db" ]; then
