@@ -66,12 +66,25 @@ async def health_live():
 # ── Root Landing & Diagnostic Routes ─────────────────────────────────────────
 @app.api_route("/favicon.ico", methods=["GET", "HEAD"])
 @app.api_route("/favicon.png", methods=["GET", "HEAD"])
+@app.api_route("/favicon.svg", methods=["GET", "HEAD"])
 @app.api_route("/static/favicon.png", methods=["GET", "HEAD"])
 @app.api_route("/static/favicon.ico", methods=["GET", "HEAD"])
 @app.api_route("/omniroute/static/favicon.png", methods=["GET", "HEAD"])
 @app.api_route("/omniroute/static/favicon.ico", methods=["GET", "HEAD"])
 async def favicon():
     return Response(content=b"", status_code=204)
+
+@app.api_route("/icon-512.png", methods=["GET", "HEAD"])
+@app.api_route("/icon-192.png", methods=["GET", "HEAD"])
+@app.api_route("/omniroute/icon-512.png", methods=["GET", "HEAD"])
+@app.api_route("/omniroute/icon-192.png", methods=["GET", "HEAD"])
+async def icons():
+    return Response(content=b"", status_code=204)
+
+@app.api_route("/offline", methods=["GET", "HEAD"])
+@app.api_route("/omniroute/offline", methods=["GET", "HEAD"])
+async def offline_page():
+    return HTMLResponse(content="<!DOCTYPE html><html><head><title>OpenCode Space</title></head><body style='background:#0f172a;color:#f8fafc;font-family:system-ui;text-align:center;padding:50px;'><h2>OpenCode Space Gateway Online</h2><p><a href='/dashboard' style='color:#38bdf8;'>Go to OmniRoute Dashboard</a></p></body></html>", status_code=200)
 
 @app.api_route("/manifest.json", methods=["GET", "HEAD"])
 @app.api_route("/manifest.webmanifest", methods=["GET", "HEAD"])

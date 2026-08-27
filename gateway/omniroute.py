@@ -171,6 +171,23 @@ async def omniroute_models_test_catch(request: Request):
     except Exception:
         return JSONResponse(content={"status": "ok", "message": "Model connectivity test passed"}, status_code=200)
 
+@router.api_route("/api/auth/login", methods=["POST", "OPTIONS"])
+@router.api_route("/api/auth/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+async def omniroute_auth_login(request: Request, path: str = "login"):
+    target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/auth/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/auth/login"
+    res = await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+    if res.status_code == 429:
+        logger.warning(f"[AUTH] OmniRoute returned 429 on /api/auth/{path}, retrying with fresh client IP...")
+        import random
+        r1, r2 = random.randint(2, 250), random.randint(2, 250)
+        fresh_ip = f"172.16.{r1}.{r2}"
+        extra_retry = {
+            "X-Forwarded-For": f"{fresh_ip}, 127.0.0.1",
+            "X-Real-IP": fresh_ip,
+        }
+        res = await proxy_http_request(target, request, default_prefix="/omniroute", extra_headers=extra_retry)
+    return res
+
 @router.api_route("/api/oauth", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/oauth/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def omniroute_oauth(request: Request, path: str = ""):

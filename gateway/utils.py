@@ -92,16 +92,34 @@ _HOP_BY_HOP_HEADERS = {
     "content-length", "content-encoding"
 }
 
+def get_client_ip(request: Request) -> str:
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        ips = [ip.strip() for ip in xff.split(",") if ip.strip() and ip.strip() != "127.0.0.1"]
+        if ips:
+            return ips[0]
+    x_real = request.headers.get("x-real-ip")
+    if x_real and x_real != "127.0.0.1":
+        return x_real.strip()
+    if request.client and request.client.host and request.client.host != "127.0.0.1":
+        return request.client.host
+    return "127.0.0.1"
+
 def build_upstream_headers(request: Request, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     headers = {
         k: v for k, v in request.headers.items()
         if k.lower() not in _HOP_BY_HOP_HEADERS and k.lower() not in ("host", "user-agent")
     }
+    client_ip = get_client_ip(request)
     headers["Host"]              = PUBLIC_HOST
     headers["X-Forwarded-Host"]  = PUBLIC_HOST
     headers["X-Forwarded-Proto"] = "https"
     headers["X-Forwarded-Port"]  = "443"
-    headers["X-Real-IP"]         = request.client.host if request.client else "127.0.0.1"
+    headers["X-Real-IP"]         = client_ip
+    headers["X-Forwarded-For"]   = f"{client_ip}, 127.0.0.1"
     headers["User-Agent"]        = request.headers.get("user-agent") or "Python-urllib/3.11"
     if extra_headers:
         for ek, ev in extra_headers.items():

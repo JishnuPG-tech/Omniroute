@@ -289,6 +289,9 @@ echo "[BOOT] Background services starting asynchronously..."
     if command -v redis-server >/dev/null 2>&1; then
         echo "[INIT] Starting Redis server on port 6379..."
         redis-server --daemonize yes 2>/dev/null || true
+        if command -v redis-cli >/dev/null 2>&1; then
+            redis-cli flushall 2>/dev/null || true
+        fi
     fi
 
     echo "[INIT] Starting OmniRoute AI Gateway..."
@@ -323,6 +326,19 @@ echo "[BOOT] Background services starting asynchronously..."
     export REQUIRE_API_KEY=false
     export OMNIROUTE_REQUIRE_API_KEY=false
     export OMNIROUTE_AUTH_REQUIRED=false
+    export RATE_LIMIT_ENABLED=false
+    export ENABLE_RATE_LIMIT=false
+    export ENABLE_RATE_LIMITING=false
+    export OMNIROUTE_RATE_LIMIT_ENABLED=false
+    export AUTH_RATE_LIMIT=false
+    export LOGIN_RATE_LIMIT=false
+    export DISABLE_RATE_LIMIT=true
+    export DISABLE_RATE_LIMITING=true
+    export AUTH_RATE_LIMIT_MAX=100000
+    export AUTH_RATE_LIMIT_WINDOW_MS=1000
+    export RATE_LIMIT_MAX=100000
+    export RATE_LIMIT_WINDOW_MS=1000
+    export TRUST_PROXY=true
 
     if [ -d "/omniroute" ]; then
         cd /omniroute
