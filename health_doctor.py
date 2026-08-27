@@ -24,8 +24,6 @@ if not logger.handlers:
 TARGET_DATABASES = [
     "/root/.omniroute/storage.sqlite",
     "/data/omniroute/storage.sqlite",
-    "/root/.open-webui/webui.db",
-    "/data/open-webui/webui.db",
 ]
 
 BACKUP_DIR = "/data/omniroute/backups"

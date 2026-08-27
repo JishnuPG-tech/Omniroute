@@ -30,7 +30,7 @@ pinned: false
 
 ## 🌟 Project Overview
 
-**OpenCode CLI** is a production-grade, multi-service Docker container hub combining an OpenAI-compatible LLM router (**OmniRoute**), an autonomous self-improving AI agent (**Hermes Agent**), a modern chat UI (**Open WebUI**), a media server (**Jellyfin**), and a high-speed video streamer (**Telegram Drive Proxy**), all orchestrated behind a unified FastAPI & Nginx reverse proxy with persistent storage synchronization.
+**OpenCode CLI** is a production-grade, multi-service Docker container hub combining an OpenAI-compatible LLM router (**OmniRoute**), an autonomous self-improving AI agent (**Hermes Agent**), a media server (**Jellyfin**), and a high-speed video streamer (**Telegram Drive Proxy**), all orchestrated behind a unified FastAPI & Nginx reverse proxy with persistent storage synchronization.
 
 ---
 
@@ -41,23 +41,20 @@ graph TD
     Client[📱 Clients / Mobile APK / Web Browser / Telegram] -->|HTTPS :4096| Nginx[🌐 Nginx Reverse Proxy]
     Nginx -->|Proxy /| FastAPI[⚡ FastAPI Master Gateway :8000]
 
-    FastAPI -->|Proxy /v1/*| OmniRoute[🧠 OmniRoute AI Gateway :20129]
+    FastAPI -->|Proxy /v1/*, /dashboard| OmniRoute[🧠 OmniRoute AI Gateway :20128]
     FastAPI -->|Proxy /hermes/*| Hermes[🤖 Hermes Agent Framework :8642]
-    FastAPI -->|Proxy /_app, /api| OpenWebUI[💬 Open WebUI :8098]
     FastAPI -->|Proxy /jellyfin| Jellyfin[🎬 Jellyfin Server :8096]
-    FastAPI -->|Proxy /tg-stream| TGStream[⚡ Telegram Streamer]
+    FastAPI -->|Proxy /tg-stream| TGStream[⚡ Telegram Streamer :8080]
 
     OmniRoute -->|LLM Backend| ExternalLLM[☁️ Cloud Providers / OpenAI / Anthropic / Gemini]
     Hermes -->|API Calling| OmniRoute
 
     subgraph Persistence Layer [/data Volume]
         OmniRouteDB[(storage.sqlite)]
-        WebUIDB[(webui.db)]
         HermesMemory[(Hermes Memory & Skills)]
     end
 
     OmniRoute -.->|15s Snapshot| OmniRouteDB
-    OpenWebUI -.->|15s Snapshot| WebUIDB
     Hermes -.->|15s rsync| HermesMemory
 ```
 
@@ -75,17 +72,13 @@ graph TD
 - **Persistent Memory & Self-Improving Skills**: Automatically learns user preferences (`USER.md`), facts (`MEMORY.md`), and generates python skills (`skills/`).
 - **OpenAI-Compatible Endpoint**: Exposes `/hermes/v1/chat/completions` and `/hermes/v1/models` for mobile APKs, Termux, and OpenAI SDKs.
 
-### 💬 3. Open WebUI (`/`)
-- **Modern AI Chat Interface**: Multi-modal chat, code highlighting, artifact previews, and prompt templates.
-- **Persistent Workspace**: Stores chats, custom prompts, and settings securely.
-
-### 🎬 4. Jellyfin Media Server (`/jellyfin/`)
+### 🎬 3. Jellyfin Media Server (`/jellyfin/`)
 - **Personal Media Streaming**: Stream movies, TV shows, and audio directly from persistent storage.
 
-### ⚡ 5. Telegram Stream Proxy (`/tg-stream/`)
+### ⚡ 4. Telegram Stream Proxy (`/tg-stream/`)
 - **High-Speed Range Streamer**: Stream video files directly from Telegram channels using chunked HTTP range requests.
 
-### 🛡️ 6. Self-Healing & Persistence Supervisor
+### 🛡️ 5. Self-Healing & Persistence Supervisor
 - **PID 1 Supervisor**: Auto-restarts any crashed background service within 5 seconds.
 - **Integrity Validation**: Periodic background snapshotting to `/data/` persistent volumes.
 
@@ -96,12 +89,10 @@ graph TD
 | Microservice | Internal Port | External Route | Status Health Check |
 |---|---|---|---|
 | **Public Gateway** | `:4096` / `:8000` | `/` | `GET /health/live` |
-| **Open WebUI** | `:8098` | `/` | `GET /health` |
-| **OmniRoute API Bridge** | `:20129` | `/v1/*` | `GET /v1/models` |
-| **OmniRoute Dashboard** | `:20128` | `/dashboard` | `GET /dashboard` |
+| **OmniRoute API & Dashboard** | `:20128` | `/v1/*`, `/dashboard` | `GET /v1/models` |
 | **Hermes Agent Framework** | `:8642` | `/hermes/v1/*` | `GET /hermes/health` |
 | **Jellyfin Media Server** | `:8096` | `/jellyfin/` | `GET /jellyfin/` |
-| **Telegram Streamer** | Internal | `/tg-stream/` | `GET /tg-stream/health` |
+| **Telegram Streamer** | `:8080` | `/tg-stream/` | `GET /tg-stream/health` |
 
 ---
 
@@ -188,7 +179,6 @@ Access the hub at `http://localhost:4096`.
 ## 📚 Documentation Reference
 
 - 📄 [`HERMES_ARCHITECTURE.md`](HERMES_ARCHITECTURE.md) — Hermes Agent Framework architecture, port matrix, and locking rules.
-- 🔒 [`OPENWEBUI_ARCHITECTURE.md`](OPENWEBUI_ARCHITECTURE.md) — Open WebUI architecture, assets resolution, and locking instructions.
 - 🧠 [`OMNIROUTE_INTEGRATION_PLAN.md`](OMNIROUTE_INTEGRATION_PLAN.md) — OmniRoute AI Gateway routing architecture.
 - 🚀 [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) — Deployment and persistence guide.
 - 🏗️ [`ARCHITECTURE.md`](ARCHITECTURE.md) — Multi-service system architecture overview.

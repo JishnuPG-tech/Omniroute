@@ -29,10 +29,10 @@ def get_structured_logger(name: str) -> logging.Logger:
 logger = get_structured_logger("GatewayUtils")
 
 # Port definitions
-WEBUI_PORT         = int(os.environ.get("WEBUI_PORT", 8098))
 OMNIROUTE_PORT     = int(os.environ.get("OMNIROUTE_PORT", 20128))
 OMNIROUTE_API_PORT = int(os.environ.get("OMNIROUTE_API_PORT", 20129))
 OMNIROUTE_WS_PORT  = int(os.environ.get("OMNIROUTE_WS_PORT", 20132))
+HERMES_PORT        = int(os.environ.get("HERMES_PORT", 8642))
 JELLYFIN_PORT      = int(os.environ.get("JELLYFIN_PORT", 8096))
 TG_PORT            = int(os.environ.get("TG_PORT", 8080))
 GATEWAY_PORT       = int(os.environ.get("GATEWAY_PORT", 8000))
@@ -40,7 +40,7 @@ GATEWAY_PORT       = int(os.environ.get("GATEWAY_PORT", 8000))
 PUBLIC_HOST   = os.environ.get("PUBLIC_HOST", "jishnupg-opencode-cli.hf.space")
 PUBLIC_ORIGIN = f"https://{PUBLIC_HOST}"
 
-_INTERNAL_PORTS = {GATEWAY_PORT, WEBUI_PORT, OMNIROUTE_PORT, OMNIROUTE_API_PORT, OMNIROUTE_WS_PORT, JELLYFIN_PORT, TG_PORT}
+_INTERNAL_PORTS = {GATEWAY_PORT, OMNIROUTE_PORT, OMNIROUTE_API_PORT, OMNIROUTE_WS_PORT, HERMES_PORT, JELLYFIN_PORT, TG_PORT}
 _PORT_STRIP_RE  = re.compile(r"(https?://[^/:]+):(" + "|".join(str(p) for p in _INTERNAL_PORTS) + r")")
 
 _PORT_PREFIX_MAP = {
@@ -48,7 +48,7 @@ _PORT_PREFIX_MAP = {
     OMNIROUTE_PORT:     "",
     OMNIROUTE_API_PORT: "",
     OMNIROUTE_WS_PORT:  "/live-ws",
-    WEBUI_PORT:         "",
+    HERMES_PORT:        "/hermes",
     JELLYFIN_PORT:      "/jellyfin",
     TG_PORT:            "/tg-stream",
 }
@@ -188,8 +188,8 @@ async def proxy_http_request(
             if attempt < 3:
                 await asyncio.sleep(0.3 * attempt)
                 continue
-            if method in ("GET", "HEAD") and ("html" in request.headers.get("accept", "").lower() or request.url.path in ("/", "/index.html", "/healthz", "/health", "/omniroute", "/dashboard", "/jellyfin") or request.url.path.startswith("/dashboard") or request.url.path.startswith("/omniroute") or request.url.path.startswith("/jellyfin")):
-                service_name = "OmniRoute AI Gateway" if default_prefix == "/omniroute" or "omniroute" in request.url.path or "dashboard" in request.url.path else ("Jellyfin Media Server" if default_prefix == "/jellyfin" or "jellyfin" in request.url.path else "Open WebUI")
+            if method in ("GET", "HEAD") and ("html" in request.headers.get("accept", "").lower() or request.url.path in ("/", "/index.html", "/healthz", "/health", "/omniroute", "/dashboard", "/jellyfin", "/hermes") or request.url.path.startswith("/dashboard") or request.url.path.startswith("/omniroute") or request.url.path.startswith("/jellyfin") or request.url.path.startswith("/hermes")):
+                service_name = "OmniRoute AI Gateway" if default_prefix == "/omniroute" or "omniroute" in request.url.path or "dashboard" in request.url.path else ("Jellyfin Media Server" if default_prefix == "/jellyfin" or "jellyfin" in request.url.path else ("Hermes Autonomous Agent" if default_prefix == "/hermes" or "hermes" in request.url.path else "OpenCode Space"))
 
                 html_retry = f"""<!DOCTYPE html>
 <html>

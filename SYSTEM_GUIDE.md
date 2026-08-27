@@ -8,10 +8,9 @@ This document serves as an exhaustive reference record for the fixes, configurat
 
 | Service | Local Endpoint | External Endpoint Path | Description |
 |---|---|---|---|
-| **Gateway Proxy** | `http://127.0.0.1:8000` | `https://jishnupg-opencode-cli.hf.space/` | FastAPI ASGI Reverse Proxy & Auto Model Resolver |
-| **OmniRoute AI Gateway** | `http://127.0.0.1:20128` | `/v1/chat/completions` & `/dashboard` | Multi-provider AI router managing 105 connected models |
+| **Gateway Proxy** | `http://127.0.0.1:8000` | `https://jishnupg-opencode-cli.hf.space/` | FastAPI ASGI Reverse Proxy & Multi-Service Hub |
+| **OmniRoute AI Gateway** | `http://127.0.0.1:20128` | `/v1/chat/completions` & `/dashboard` | Multi-provider AI router managing connected models |
 | **Hermes Agent** | `http://127.0.0.1:8642` | `/hermes/` | Autonomous AI agent backend & Telegram Bot integration |
-| **Open WebUI** | `http://127.0.0.1:8098` | `/` (Root Web UI) | Web chat interface |
 | **Telegram Streamer** | `http://127.0.0.1:8080` | `/tg_stream/` | Telegram file & media streaming service |
 | **Jellyfin Media Server** | `http://127.0.0.1:8096` | `/jellyfin/` | Media server application |
 
@@ -106,5 +105,4 @@ curl -X POST "https://jishnupg-opencode-cli.hf.space/v1/chat/completions" \
 ## 📋 Rules for Future Development
 > [!IMPORTANT]
 > 1. **Do not set `HERMES_API_BASE_URL` directly to port 20128**. Always point to Gateway port `8000` (`http://127.0.0.1:8000/v1`) so the Gateway auto-resolver maps `"auto"` to real provider models.
-> 2. **Never allow `PRAGMA journal_mode=WAL` in Open WebUI**. Persistent volumes on Hugging Face Spaces require `journal_mode=DELETE` to prevent SQLite disk I/O errors.
-> 3. **Preserve Master Key default**: `sk-6646a5f2024f6318-d27ff7-f3e152c8` must remain synced across `entrypoint.sh`, `gateway/hermes_standalone.py`, `gateway/omniroute.py`, and `gateway/hermes.py`.
+> 2. **Preserve Master Key default**: `sk-6646a5f2024f6318-d27ff7-f3e152c8` must remain synced across `entrypoint.sh`, `gateway/hermes_standalone.py`, `gateway/omniroute.py`, and `gateway/hermes.py`.

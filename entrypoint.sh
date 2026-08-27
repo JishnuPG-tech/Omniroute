@@ -32,11 +32,11 @@ git config --global --add safe.directory '*' 2>/dev/null || true
 # Step 2: Ensure persistent /data directory structure exists
 log_info "INIT" "Setting up /data persistent volume directories..."
 mkdir -p /data/share/opencode /data/config/opencode /data/cache/opencode /data/state/opencode 2>/dev/null || true
-mkdir -p /data/open-webui /data/omniroute 2>/dev/null || true
+mkdir -p /data/omniroute 2>/dev/null || true
 mkdir -p /data/jellyfin/data /data/jellyfin/config /data/jellyfin/cache /data/jellyfin/log /data/jellyfin/media/Movies /data/jellyfin/media/TVShows 2>/dev/null || true
 mkdir -p /data/hermes/memories /data/hermes/skills /data/hermes/sessions 2>/dev/null || true
 mkdir -p /root/.cache /data/cache /root/.hermes/memories /root/.hermes/skills 2>/dev/null || true
-chmod 777 /root/.cache /data/cache /data/hermes /data/omniroute /data/open-webui 2>/dev/null || true
+chmod 777 /root/.cache /data/cache /data/hermes /data/omniroute 2>/dev/null || true
 
 # Playwright Browser Metadata Fix for gemini-web / browser providers
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -103,7 +103,6 @@ export OMNIROUTE_SECRET_KEY="${STORAGE_ENCRYPTION_KEY}"
 export OMNIROUTE_STORAGE_KEY="${STORAGE_ENCRYPTION_KEY}"
 export OMNIROUTE_STORAGE_SECRET="${STORAGE_ENCRYPTION_KEY}"
 export OMNIROUTE_WS_BRIDGE_SECRET="${OMNIROUTE_WS_BRIDGE_SECRET:-$(echo "ws_bridge_${JWT_SECRET}" | sha256sum | cut -c1-48)}"
-export WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-$(echo "owui_${JWT_SECRET}" | sha256sum | cut -c1-56)}"
 
 # Purge any legacy secret env files from storage bucket to maintain strict secret separation
 rm -f /data/.env /data/secrets.env /data/secrets /data/config/.env /data/omniroute/.env /data/omniroute/secrets.env /data/omniroute/secrets /data/omniroute/.secrets /data/omniroute/server.env 2>/dev/null || true
@@ -118,16 +117,11 @@ BACKUP_DIR="/data/omniroute/backups"
 RUNTIME_DIR="/root/.omniroute"
 RUNTIME_DB="/root/.omniroute/storage.sqlite"
 
-PERSIST_WEBUI_DIR="/data/open-webui"
-PERSIST_WEBUI_DB="/data/open-webui/webui.db"
-RUNTIME_WEBUI_DIR="/root/.open-webui"
-RUNTIME_WEBUI_DB="/root/.open-webui/webui.db"
-
 if [ -d "$PERSIST_DB" ]; then
     rm -rf "$PERSIST_DB" 2>/dev/null || true
 fi
 
-mkdir -p "$PERSIST_DIR" "$BACKUP_DIR" "$RUNTIME_DIR" "$PERSIST_WEBUI_DIR" "$RUNTIME_WEBUI_DIR" 2>/dev/null || true
+mkdir -p "$PERSIST_DIR" "$BACKUP_DIR" "$RUNTIME_DIR" 2>/dev/null || true
 
 if [ -f "$PERSIST_DB" ] && [ -s "$PERSIST_DB" ]; then
     _INIT_SIZE=$(wc -c < "$PERSIST_DB" 2>/dev/null | tr -d ' \t\n\r' || echo "0")
@@ -155,23 +149,6 @@ if [ -f "$PERSIST_DB" ] && [ -s "$PERSIST_DB" ]; then
         rm -f "$RUNTIME_DIR/storage.sqlite"* 2>/dev/null || true
         cp -f "$PERSIST_DB" "$RUNTIME_DB" 2>/dev/null || true
         echo "[PERSISTENCE] Restored persistent database snapshot directly into ${RUNTIME_DB}."
-    fi
-fi
-
-if [ -f "$PERSIST_WEBUI_DB" ] && [ -s "$PERSIST_WEBUI_DB" ]; then
-    _WEBUI_SIZE=$(wc -c < "$PERSIST_WEBUI_DB" 2>/dev/null | tr -d ' \t\n\r' || echo "0")
-    echo "[PERSISTENCE] Found Open WebUI snapshot at: ${PERSIST_WEBUI_DB} (${_WEBUI_SIZE} bytes)"
-    if command -v sqlite3 >/dev/null 2>&1; then
-        _WCHK=$(sqlite3 "$PERSIST_WEBUI_DB" "PRAGMA quick_check;" 2>/dev/null || echo "failed")
-        if [ "$_WCHK" = "ok" ]; then
-            rm -f "$RUNTIME_WEBUI_DIR/webui.db"* 2>/dev/null || true
-            cp -f "$PERSIST_WEBUI_DB" "$RUNTIME_WEBUI_DB" 2>/dev/null || true
-            echo "[PERSISTENCE] Restored persistent Open WebUI database into ${RUNTIME_WEBUI_DB} successfully."
-        fi
-    else
-            rm -f "$RUNTIME_WEBUI_DIR/webui.db"* 2>/dev/null || true
-            cp -f "$PERSIST_WEBUI_DB" "$RUNTIME_WEBUI_DB" 2>/dev/null || true
-            echo "[PERSISTENCE] Restored persistent Open WebUI database into ${RUNTIME_WEBUI_DB}."
     fi
 fi
 
@@ -246,44 +223,6 @@ sync_omniroute_db() {
             echo "[PERSISTENCE] WARNING: Database backup quick_check failed; skipping snapshot."
         fi
     fi
-
-    # Synchronize Open WebUI database safely if active
-    for _SRC_WDB in "$RUNTIME_WEBUI_DB" "/data/open-webui/data/webui.db" "$PERSIST_WEBUI_DB"; do
-        if [ -f "$_SRC_WDB" ] && [ -s "$_SRC_WDB" ]; then
-            _R_SRC=$(python3 -c "import os; print(os.path.realpath('$_SRC_WDB'))" 2>/dev/null || echo "$_SRC_WDB")
-            _R_DST=$(python3 -c "import os; print(os.path.realpath('$PERSIST_WEBUI_DB'))" 2>/dev/null || echo "$PERSIST_WEBUI_DB")
-
-            if [ "$_R_SRC" != "$_R_DST" ]; then
-                _W_TMP="${PERSIST_WEBUI_DB}.tmp"
-                rm -f "$_W_TMP" 2>/dev/null || true
-                if command -v sqlite3 >/dev/null 2>&1; then
-                    sqlite3 "$_SRC_WDB" "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
-                    sqlite3 "$_SRC_WDB" ".backup '$_W_TMP'" 2>/dev/null || cp -f "$_SRC_WDB" "$_W_TMP" 2>/dev/null || true
-                else
-                    cp -f "$_SRC_WDB" "$_W_TMP" 2>/dev/null || true
-                fi
-
-                _WCHK="failed"
-                if [ -f "$_W_TMP" ] && [ -s "$_W_TMP" ]; then
-                    if command -v sqlite3 >/dev/null 2>&1; then
-                        _WCHK=$(sqlite3 "$_W_TMP" "PRAGMA quick_check;" 2>/dev/null || echo "failed")
-                    else
-                        _WCHK="ok"
-                    fi
-                fi
-
-                if [ "$_WCHK" = "ok" ]; then
-                    mv -f "$_W_TMP" "$PERSIST_WEBUI_DB" 2>/dev/null || true
-                    rm -f "${PERSIST_WEBUI_DB}-wal" "${PERSIST_WEBUI_DB}-shm" 2>/dev/null || true
-                    _WSIZE=$(wc -c < "$PERSIST_WEBUI_DB" 2>/dev/null | tr -d ' \t\n\r' || echo "0")
-                    echo "[PERSISTENCE] Open WebUI DB snapshot OK: ${_WSIZE} bytes present at ${PERSIST_WEBUI_DB}"
-                else
-                    rm -f "$_W_TMP" 2>/dev/null || true
-                fi
-            fi
-            break
-        fi
-    done
 }
 
 shutdown_gracefully() {
@@ -291,8 +230,8 @@ shutdown_gracefully() {
     if [ -n "$OMNIROUTE_PID" ] && kill -0 $OMNIROUTE_PID 2>/dev/null; then
         kill -INT $OMNIROUTE_PID 2>/dev/null || true
     fi
-    if [ -n "$OWUI_PID" ] && kill -0 $OWUI_PID 2>/dev/null; then
-        kill -INT $OWUI_PID 2>/dev/null || true
+    if [ -n "$HERMES_PID" ] && kill -0 $HERMES_PID 2>/dev/null; then
+        kill -INT $HERMES_PID 2>/dev/null || true
     fi
     sleep 2
     sync_omniroute_db >/dev/null 2>&1 || true
@@ -451,160 +390,7 @@ else
     echo "[INIT] Jellyfin disabled (ENABLE_JELLYFIN!=1)"
 fi
 
-# Step 11: Start Open WebUI in Background (Port 8098)
-# Optional: disabled by default — OpenWebUI is the heaviest boot component.
-if [ "${ENABLE_OPENWEBUI:-0}" = "1" ] && command -v open-webui >/dev/null 2>&1; then
-    echo "[HEALTH] Open WebUI starting in background on port 8098..."
-    mkdir -p /root/.open-webui /data/open-webui /data/cache 2>/dev/null || true
-    if [ -f "/data/open-webui/webui.db" ] && ! [ -s "/data/open-webui/webui.db" ]; then
-        rm -f /data/open-webui/webui.db 2>/dev/null || true
-    fi
-    if [ -f "/data/open-webui/webui.db" ] && [ -s "/data/open-webui/webui.db" ]; then
-        mkdir -p /root/.open-webui/data 2>/dev/null || true
-        rm -f /root/.open-webui/*.db-wal /root/.open-webui/*.db-shm /data/open-webui/*.db-wal /data/open-webui/*.db-shm 2>/dev/null || true
-        cp -f /data/open-webui/webui.db /root/.open-webui/webui.db 2>/dev/null || true
-        cp -f /data/open-webui/webui.db /root/.open-webui/data/webui.db 2>/dev/null || true
-        echo "[PERSISTENCE] Restored Open WebUI database snapshot ($(wc -c < /data/open-webui/webui.db | tr -d ' ') bytes)."
-    fi
-
-    # Configure lightweight RAG embedding engine ('none') across all webui.db config rows & reset journal mode
-    python3 -c "
-import sqlite3, json, os
-for path in ['/root/.open-webui/webui.db', '/root/.open-webui/data/webui.db', '/data/open-webui/webui.db']:
-    try:
-        if not os.path.exists(path):
-            continue
-        conn = sqlite3.connect(path)
-        cursor = conn.cursor()
-        try:
-            cursor.execute('PRAGMA journal_mode=DELETE;')
-        except Exception:
-            pass
-        cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table';\")
-        tables = [t[0] for t in cursor.fetchall()]
-        if 'config' in tables:
-            cursor.execute(\"SELECT id, data FROM config\")
-            rows = cursor.fetchall()
-            found_rag = False
-            for row_id, raw_data in rows:
-                try:
-                    data = json.loads(raw_data)
-                    if row_id == 'rag':
-                        found_rag = True
-                    data['embedding_engine'] = 'none'
-                    data['embedding_model'] = ''
-                    if 'rag' in data and isinstance(data['rag'], dict):
-                        data['rag']['embedding_engine'] = 'none'
-                        data['rag']['embedding_model'] = ''
-                    cursor.execute('UPDATE config SET data = ? WHERE id = ?', (json.dumps(data), row_id))
-                except Exception:
-                    pass
-            if not found_rag:
-                data = {'embedding_engine': 'none', 'embedding_model': '', 'rag': {'embedding_engine': 'none', 'embedding_model': ''}}
-                cursor.execute(\"INSERT INTO config (id, data) VALUES ('rag', ?)\", (json.dumps(data),))
-        conn.commit()
-        conn.close()
-        print(f'[LIGHTWEIGHT] Pinned none RAG config in {path}')
-    except Exception:
-        pass
-" 2>/dev/null || true
-
-    # Patch Open WebUI internal db.py to use journal_mode=DELETE to prevent SQLite WAL disk I/O errors
-    python3 -c "
-import glob
-for path in glob.glob('/usr/local/lib/python*/dist-packages/open_webui/internal/db.py'):
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            code = f.read()
-        if 'PRAGMA journal_mode=WAL' in code:
-            code = code.replace('PRAGMA journal_mode=WAL', 'PRAGMA journal_mode=DELETE')
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(code)
-            print('[FIX] Patched Open WebUI journal_mode=DELETE in db.py')
-    except Exception as e:
-        print('[FIX] Could not patch db.py:', e)
-" 2>/dev/null || true
-
-    # 5. Start Open WebUI
-    echo "[INIT] Starting Open WebUI on port 8098..."
-    if command -v open-webui >/dev/null 2>&1; then
-        export WEBUI_URL="${WEBUI_URL:-https://jishnupg-opencode-cli.hf.space}"
-        export OPENAI_API_BASE_URL="${OPENAI_API_BASE_URL:-http://127.0.0.1:8000/v1}"
-        export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-2e556e0437ee2958-7baf2d-b4133935}"
-        export WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-${JWT_SECRET:-openwebui_master_secret_key_fixed_2026}}"
-        export ENABLE_OLLAMA_API="${ENABLE_OLLAMA_API:-false}"
-        export ENABLE_OPENAI_API="true"
-        export ENABLE_WEBSOCKET_SUPPORT="true"
-        export WEBSOCKET_MANAGER="redis"
-        export WEBSOCKET_REDIS_URL="redis://127.0.0.1:6379/1"
-        export WEBUI_WORKERS=1
-        export BYPASS_EMBEDDING_AND_RETRIEVAL="true"
-        export RAG_EMBEDDING_ENGINE="none"
-        export RAG_EMBEDDING_MODEL=""
-        export VECTOR_DB_EMBEDDING_FUNCTION="none"
-        export RAG_RERANKING_MODEL=""
-        export ENABLE_RAG_HYBRID_SEARCH="false"
-        export ENABLE_RAG_LOCAL_WEB_FETCH="false"
-        export RAG_AUTO_UPDATE="false"
-        export RAG_AUTO_UPDATE_INDEX="false"
-        export HF_HUB_OFFLINE=1
-        export TRANSFORMERS_OFFLINE=1
-        export RAG_AUTO_UPDATE="false"
-        export RAG_AUTO_UPDATE_INDEX="false"
-        export ENABLE_VERSION_UPDATE_CHECK="false"
-        export TOOL_SERVERS=""
-        export OPENAPI_TOOL_SERVERS=""
-        export PORT=8098
-        export DATA_DIR="/data/open-webui"
-        unset DATABASE_URL 2>/dev/null || true
-        export WEBUI_AUTH="true"
-        export ENABLE_SIGNUP="true"
-        mkdir -p /root/.cache /data/cache /data/open-webui /root/.open-webui 2>/dev/null || true
-        if [ -f "/data/open-webui/webui.db" ]; then
-            if command -v sqlite3 >/dev/null 2>&1; then
-                if ! sqlite3 "/data/open-webui/webui.db" "PRAGMA quick_check;" >/dev/null 2>&1; then
-                    echo "[FIX] Corrupt Open WebUI database detected! Resetting /data/open-webui/webui.db..."
-                    rm -f /data/open-webui/webui.db* /root/.open-webui/webui.db* 2>/dev/null || true
-                fi
-            fi
-        fi
-        if [ -d "/data/open-webui/webui.db" ]; then
-            rm -rf "/data/open-webui/webui.db" 2>/dev/null || true
-        fi
-        chmod -R 777 /data/open-webui /root/.open-webui 2>/dev/null || true
-        export CORS_ALLOW_ORIGIN="https://jishnupg-opencode-cli.hf.space"
-        open-webui serve --port 8098 &
-        OWUI_PID=$!
-        echo "[PROCESS] Open WebUI: PID ${OWUI_PID}"
-        (
-            for i in $(seq 1 60); do
-                if curl -fsS "http://127.0.0.1:8098/health" >/dev/null 2>&1 || curl -fsS "http://127.0.0.1:8098/api/config" >/dev/null 2>&1; then
-                    log_info "HEALTH" "Open WebUI ready after ${i}s"
-                    break
-                fi
-                sleep 1
-            done
-        ) &
-    fi
-fi
-
-# Start Periodic 15s Database Persistence Backup Daemon
-(
-    while true; do
-        sleep 15
-        sync_omniroute_db >/dev/null 2>&1 || true
-        # Sync Hermes persistent memory, skills, sessions, SQLite DB
-        if [ -d "/root/.hermes" ]; then
-            mkdir -p /data/hermes/memories /data/hermes/skills /data/hermes/sessions 2>/dev/null || true
-            rsync -a --update /root/.hermes/. /data/hermes/ 2>/dev/null || \
-                cp -rf /root/.hermes/. /data/hermes/ 2>/dev/null || true
-            _HERMES_SIZE=$(du -sh /data/hermes 2>/dev/null | cut -f1 || echo "?")
-            echo "[PERSISTENCE] Hermes snapshot OK: ${_HERMES_SIZE} synced to /data/hermes"
-        fi
-    done
-) &
-
-# Step 12: Start Hermes Agent in Background (Port 8642)
+# Step 11: Start Hermes Agent in Background (Port 8642)
 if true; then
     echo "[HEALTH] Hermes Agent starting in background on port 8642..."
     mkdir -p /data/hermes/memories /data/hermes/skills /data/hermes/sessions 2>/dev/null || true
@@ -626,16 +412,6 @@ os.environ["OPENAI_BASE_URL"] = "http://127.0.0.1:20128/v1"
 os.environ["OPENAI_API_KEY"] = os.getenv("OMNIROUTE_API_KEY", "sk-6646a5f2024f6318-d27ff7-f3e152c8")
 os.environ["HERMES_API_BASE_URL"] = "http://127.0.0.1:20128/v1"
 os.environ["HERMES_API_KEY"] = os.getenv("OMNIROUTE_API_KEY", "sk-6646a5f2024f6318-d27ff7-f3e152c8")
-try:
-    import open_webui.routers.retrieval as rrouter
-    rrouter.get_ef = lambda engine, model: None
-except Exception:
-    pass
-try:
-    import open_webui.retrieval.utils as rutils
-    rutils.get_model_path = lambda model, auto_update=False: ""
-except Exception:
-    pass
 PYCUSTOM
         fi
     done

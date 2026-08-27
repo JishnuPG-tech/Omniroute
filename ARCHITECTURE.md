@@ -11,15 +11,15 @@ All client traffic terminates at **Port 4096** (the exposed public port on Huggi
 ```
                                   [🌐 Public Internet Client]
                                                │
-                                 [Nginx Edge Proxy (Port 4096)]
+                                  [Nginx Edge Proxy (Port 4096)]
                                                │
-                                 [FastAPI Master Gateway (:8000)]
+                                  [FastAPI Master Gateway (:8000)]
                                                │
-  ┌──────────────────┬─────────────────────────┼────────────────────────┬──────────────────┐
-  │                  │                         │                        │                  │
-[Open WebUI]  [OmniRoute Dashboard]   [OmniRoute Dedicated API] [Jellyfin Media]  [TG 5G Streamer]
-(Port 8098)    (Port 20128)             (Port 20129)             (Port 8096)        (Port 8080)
-  Path: /       Path: /dashboard         Path: /v1, /v1beta       Path: /jellyfin    Path: /tg-stream
+   ┌───────────────────────┬───────────────────┴───────────────────┬──────────────────┐
+   │                       │                                       │                  │
+[Portal Hub / Dashboard] [OmniRoute API & Dash]        [Hermes Autonomous Agent] [Jellyfin & TG]
+(FastAPI Internal)       (Port 20128)                  (Port 8642)               (Port 8096 / 8080)
+  Path: /                  Path: /v1, /dashboard         Path: /hermes/v1/*        Path: /jellyfin, /tg-stream
 ```
 
 ### Complete Ingress Routing Matrix
@@ -27,16 +27,17 @@ All client traffic terminates at **Port 4096** (the exposed public port on Huggi
 | Ingress Path / Pattern | Upstream Host:Port | Microservice | Protocol / Handler | Header Sanitization |
 | :--- | :--- | :--- | :--- | :--- |
 | `GET /health/live` | Internal Gateway | FastAPI Gateway | Native ASGI JSON | Instant 200 OK (<1ms) |
-| `/` (Default Fallback) | `127.0.0.1:8098` | Open WebUI | HTTP / Socket.IO WS | HTML base rewrite (`/`) |
+| `/`, `/index.html` | Internal Gateway | Multi-Service Portal | HTML File Response | Portal Landing UI |
 | `/omniroute`, `/omniroute/`| `127.0.0.1:8000` | FastAPI Gateway | HTTP 307 Redirect | Redirects to `/dashboard` |
 | `/dashboard/*` | `127.0.0.1:20128` | OmniRoute Dashboard | HTTP / Next.js SSR | Strip X-Frame-Options |
-| `/v1/*`, `/api/v1/*` | `127.0.0.1:20129` | Dedicated OpenAI API | OpenAI SSE Stream | CORS `*`, `Host` forward |
-| `/v1beta/*`, `/api/v1beta/*`| `127.0.0.1:20129` | Dedicated Gemini API | Gemini JSON / Stream | CORS `*`, `Host` forward |
+| `/v1/*`, `/api/v1/*` | `127.0.0.1:20128` | OmniRoute AI API | OpenAI SSE Stream | CORS `*`, `Host` forward |
+| `/v1beta/*`, `/api/v1beta/*`| `127.0.0.1:20128` | Gemini Web Bridge | Gemini JSON / Stream | CORS `*`, `Host` forward |
+| `/hermes/v1/*` | `127.0.0.1:8642` | Hermes Autonomous Agent | OpenAI / Tool SSE | Bearer Auth Forward |
 | `/api/providers/*` | `127.0.0.1:20128` | OmniRoute Management | REST JSON API | Encrypted DB read |
 | `/api/custom-models/*` | `127.0.0.1:20128` | OmniRoute Management | REST JSON API | Referer-based proxy |
 | `/api/connections/*` | `127.0.0.1:20128` | OmniRoute Management | REST JSON API | Referer-based proxy |
 | `/api/oauth/*` | `127.0.0.1:20128` | OmniRoute OAuth | Remote OAuth Flow | `ALLOW_REMOTE_OAUTH` |
-| `/live-ws/*` | `127.0.0.1:20132` | Live Telemetry WS | WebSocket Stream | `Host`, `X-Forwarded-*` |
+| `/live-ws/*` | `127.0.0.1:20128` | Live Telemetry WS | WebSocket Stream | `Host`, `X-Forwarded-*` |
 | `/jellyfin/*` | `127.0.0.1:8096` | Jellyfin Media Server | Range Video / HTTP | `X-Forwarded-Prefix` |
 | `/tg-stream/*`, `/tg_stream/*`| `127.0.0.1:8080` | Pyrogram 5G Streamer | 5G Chunk Streamer | Direct Pyrogram Stream |
 
@@ -44,33 +45,33 @@ All client traffic terminates at **Port 4096** (the exposed public port on Huggi
 
 ## 2. Gateway Core Engine Architecture (`gateway/`)
 
-The master gateway (`gateway/main.py`, `gateway/utils.py`, `gateway/omniroute.py`) provides intelligent request classification and routing.
+The master gateway (`gateway/main.py`, `gateway/utils.py`, `gateway/omniroute.py`, `gateway/hermes.py`) provides intelligent request classification and routing.
 
 ```
                            [Incoming HTTP Request]
-                                      │
+                                       │
                          [Security Path Traversal Check]
-                                      │
+                                       │
                         [Lightweight Probe /health/live?] ──(Yes)──> 200 OK
-                                      │ (No)
+                                       │ (No)
                          [Referer Header Inspection]
                         /                                \
            (Referer has /dashboard)            (No OmniRoute Referer)
                       │                                    │
            [Route to OmniRoute :20128]             [Match Path Prefix Matrix]
                                                   /        │         \
-                                        (OmniRoute)   (Jellyfin)  (TG Stream)
+                                        (OmniRoute)   (Hermes)    (Jellyfin / TG)
                                             │              │           │
-                                         [:20128]       [:8096]     [:8080]
+                                         [:20128]       [:8642]     [:8096 / :8080]
                                                            │
-                                                  [Default Fallback]
+                                                   [Root Fallback /]
                                                            │
-                                                    [Open WebUI :8098]
+                                                 [Multi-Service Portal]
 ```
 
 ### Key Gateway Design Patterns:
 1. **Async Connection Pooling (`httpx.AsyncClient`)**: Managed via FastAPI `@asynccontextmanager` lifespan. Connection keep-alive prevents TCP handshake overhead across internal microservice proxies.
-2. **Referer-Aware Routing**: Requests originating from OmniRoute UI pages (`Referer` containing `/dashboard` or `/omniroute`) are routed directly to OmniRoute port `20128`. This prevents auxiliary requests (`/api/custom-models`, `/api/connections`, `/providers/*.svg`) from falling through to Open WebUI.
+2. **Referer-Aware Routing**: Requests originating from OmniRoute UI pages (`Referer` containing `/dashboard` or `/omniroute`) are routed directly to OmniRoute port `20128`. This prevents auxiliary requests (`/api/custom-models`, `/api/connections`, `/providers/*.svg`) from breaking.
 3. **CORS & iFrame Security Normalization**: Automatically strips restrictive `X-Frame-Options` headers and injects `Content-Security-Policy: frame-ancestors 'self' https://huggingface.co https://*.hf.space;` to enable embedding on Hugging Face Spaces.
 
 ---
@@ -131,4 +132,4 @@ The container supervisor (`entrypoint.sh`) maintains 24/7 uptime for all backgro
 ```
 
 - **Fast Gateway Readiness**: FastAPI (`:8000`) and Nginx (`:4096`) start within **300ms**, allowing Hugging Face to report `RUNNING` status instantly.
-- **Asynchronous Heavy Boot**: OmniRoute Next.js server, Open WebUI, Jellyfin, and TG Streamer initialize in parallel background tasks without blocking public ingress.
+- **Asynchronous Heavy Boot**: OmniRoute Next.js server, Hermes Agent, Jellyfin, and TG Streamer initialize in parallel background tasks without blocking public ingress.

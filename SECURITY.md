@@ -25,6 +25,4 @@ We will respond to security reports within **48 hours** and provide periodic upd
 
 ## 🔒 Security Best Practices for Deployment
 
-- **Master Encryption Keys**: Always supply strong, unique secrets for `STORAGE_ENCRYPTION_KEY`, `OMNIROUTE_STORAGE_KEY`, `JWT_SECRET`, and `API_KEY_SECRET`.
-- **Never Commit Secrets**: Ensure `.env` and SQLite database files are listed in `.gitignore` and never committed to version control.
-- **Reverse Proxy Authentication**: Keep `WEBUI_AUTH="true"` enabled in production deployments.
+- **Reverse Proxy & API Authentication**: Keep master API key authorization and strong admin credentials configured in production deployments.

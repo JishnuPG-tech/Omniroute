@@ -36,9 +36,9 @@ RUN mkdir -p /etc/apt/keyrings \
  && apt-get update && apt-get install -y --no-install-recommends jellyfin-server jellyfin-web ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
-# Install core Python runtime dependencies
+# 3. Install core Python runtime dependencies (Lightweight, no Open WebUI)
 RUN pip3 install --no-cache-dir \
-    aiohttp pyrogram tgcrypto open-webui httpx uvicorn fastapi \
+    aiohttp pyrogram tgcrypto httpx uvicorn fastapi \
     --break-system-packages
 
 # Install hermes-agent separately with --no-deps to avoid version backtracking
@@ -56,7 +56,7 @@ COPY --from=omniroute-source /usr/local/bin/npm  /usr/local/bin/npm
 COPY --from=omniroute-source /usr/local/bin/npx  /usr/local/bin/npx
 COPY --from=omniroute-source /usr/local/lib/node_modules /usr/local/lib/node_modules
 
-RUN mkdir -p /root/.cache /data/cache /data/omniroute /data/open-webui
+RUN mkdir -p /root/.cache /data/cache /data/omniroute
 RUN chmod -R 777 /root/.cache /data/cache /omniroute
 
 # 6. Copy Gateway Proxy Application & Entrypoint Scripts

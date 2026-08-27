@@ -3,10 +3,11 @@ OpenCode Space — Production Gateway Main Application
 =====================================================
 Assembles Service Routers into a unified FastAPI ASGI Gateway:
   1. Lightweight Public Readiness: /health/live (HTTP 200 {"status": "alive"})
-  2. Open WebUI (gateway.openwebui) -> / (Root Fallback, 8098)
+  2. Root Portal Hub: / -> Multi-Service Dashboard
   3. OmniRoute Gateway (gateway.omniroute) -> /v1, /v1beta, /dashboard, /api/providers, /api/oauth, /live-ws
-  4. Jellyfin Media Server (gateway.jellyfin) -> /jellyfin (8096)
-  5. TG-Drive Direct Streamer (gateway.tg_stream) -> /tg_stream (8080)
+  4. Hermes Autonomous Agent (gateway.hermes) -> /hermes/v1/* (8642)
+  5. Jellyfin Media Server (gateway.jellyfin) -> /jellyfin (8096)
+  6. TG-Drive Direct Streamer (gateway.tg_stream) -> /tg_stream (8080)
 """
 
 import os
@@ -19,13 +20,12 @@ from gateway.utils import (
     get_http_client,
     proxy_http_request,
     get_structured_logger,
-    WEBUI_PORT,
+    HERMES_PORT,
     JELLYFIN_PORT,
     TG_PORT,
     OMNIROUTE_PORT,
     PUBLIC_HOST,
 )
-from gateway.openwebui import router as openwebui_router, fixup_webui_html, handle_openwebui_proxy
 from gateway.omniroute import router as omniroute_router, omniroute_main_route
 from gateway.jellyfin import router as jellyfin_router
 from gateway.tg_stream import router as tg_stream_router
@@ -46,7 +46,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="OpenCode Space Gateway", lifespan=lifespan, docs_url=None, redoc_url=None)
 
 # Include Service Routers
-app.include_router(openwebui_router)
 app.include_router(omniroute_router)
 app.include_router(jellyfin_router)
 app.include_router(tg_stream_router)
@@ -105,10 +104,10 @@ async def webmanifest():
 async def health_check():
     client = get_http_client()
     services = {
-        "openwebui": f"http://127.0.0.1:{WEBUI_PORT}/",
+        "omniroute": f"http://127.0.0.1:{OMNIROUTE_PORT}/",
+        "hermes":    f"http://127.0.0.1:{HERMES_PORT}/health",
         "jellyfin":  f"http://127.0.0.1:{JELLYFIN_PORT}/",
         "tg_stream": f"http://127.0.0.1:{TG_PORT}/",
-        "omniroute": f"http://127.0.0.1:{OMNIROUTE_PORT}/",
     }
     results = {}
     for name, url in services.items():
@@ -120,15 +119,24 @@ async def health_check():
     return {"gateway": "healthy", "upstreams": results}
 
 
+# ── Root Portal Route ────────────────────────────────────────────────────────
+@app.get("/")
+@app.get("/index.html")
+async def root_portal():
+    for candidate in ("/index.html", "index.html", os.path.join(os.path.dirname(__file__), "..", "index.html")):
+        if os.path.exists(candidate):
+            return FileResponse(candidate, media_type="text/html")
+    return HTMLResponse(content="<h1>OpenCode Space Gateway Online</h1><p><a href='/dashboard'>OmniRoute Dashboard</a></p>", status_code=200)
+
+
 # ── Catch-All Referer & Subpath Fallback Router ──────────────────────────────
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def route_catch_all(path: str, request: Request):
     referer = request.headers.get("referer", "").lower()
     req_path = request.url.path.lower()
 
-    # ── 0. Open WebUI SvelteKit Assets Priority ────────────────────────────────
-    if req_path.startswith("/_app/") or req_path.startswith("/static/") or req_path in ("/sw.js", "/opensearch.xml"):
-        return await proxy_http_request(f"http://127.0.0.1:{WEBUI_PORT}{req_path}", request, default_prefix="")
+    if req_path in ("/", "/index.html"):
+        return await root_portal()
 
     is_omniroute_referer = any(p in referer for p in ("/dashboard", "/omniroute", "/providers", "/home", "/connections", "/settings", "/login", "/setup", "/wizard", "/keys", "/combos", "/logs", "/stats", "/arena", "/pricing"))
 
@@ -212,7 +220,7 @@ async def route_catch_all(path: str, request: Request):
         or any(req_path == p or req_path.startswith(p) for p in OMNIROUTE_PREFIXES)
         or req_path in OMNIROUTE_EXACT
     ):
-        if not (req_path.startswith("/jellyfin") or req_path.startswith("/tg-stream") or req_path.startswith("/tg_stream") or req_path == "/health/live"):
+        if not (req_path.startswith("/jellyfin") or req_path.startswith("/tg-stream") or req_path.startswith("/tg_stream") or req_path.startswith("/hermes") or req_path == "/health/live"):
             logger.info(f"[ROUTER] {req_path} (referer={referer}) -> OmniRoute ({OMNIROUTE_PORT})")
             res = await proxy_http_request(f"http://127.0.0.1:{OMNIROUTE_PORT}{req_path}", request, default_prefix="", extra_headers=extra)
             if res.status_code in (401, 403) and not req_path.startswith("/api/v1/auths"):
@@ -236,6 +244,8 @@ async def route_catch_all(path: str, request: Request):
             sub_p = req_path[len("/tg_stream"):]
         return await proxy_http_request(f"http://127.0.0.1:{TG_PORT}{sub_p}", request, default_prefix="/tg-stream")
 
-    # ── 4. Primary Root Application Fallback -> Open WebUI (:8098) ────────────
-    logger.info(f"[ROUTER] {req_path} -> Open WebUI ({WEBUI_PORT})")
-    return await handle_openwebui_proxy(f"http://127.0.0.1:{WEBUI_PORT}{req_path}", request, default_prefix="", html_fixup=fixup_webui_html)
+    # ── 4. Default Fallback ───────────────────────────────────────────────────
+    if request.method == "GET" and "html" in request.headers.get("accept", "").lower():
+        return await root_portal()
+    
+    return JSONResponse(content={"status": "error", "message": f"Route not found: {req_path}"}, status_code=404)

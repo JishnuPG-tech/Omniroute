@@ -49,7 +49,7 @@ Please be polite, respectful, and collaborative in all communications.
    - `feat(gateway): add new endpoint for agent metrics`
    - `fix(hermes): resolve port binding configuration`
    - `docs(readme): add client integration examples`
-3. **Architecture Verification**: Ensure your changes adhere to the locked architecture documents ([`ARCHITECTURE.md`](ARCHITECTURE.md), [`HERMES_ARCHITECTURE.md`](HERMES_ARCHITECTURE.md), [`OPENWEBUI_ARCHITECTURE.md`](OPENWEBUI_ARCHITECTURE.md)).
+3. **Architecture Verification**: Ensure your changes adhere to the locked architecture documents ([`ARCHITECTURE.md`](ARCHITECTURE.md), [`HERMES_ARCHITECTURE.md`](HERMES_ARCHITECTURE.md)).
 
 ---
 

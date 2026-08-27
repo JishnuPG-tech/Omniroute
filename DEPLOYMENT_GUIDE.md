@@ -99,7 +99,7 @@ docker logs -f opencode-space
 
 ### Issue 1: `SyntaxError: Unexpected token '<'` in Frontend
 - **Symptom**: Dashboard page shows "0 connections" or console logs `<JSON.parse error>`.
-- **Cause**: Gateway routed an `/api/` request to Open WebUI instead of OmniRoute.
+- **Cause**: Gateway routed an `/api/` request to fallback instead of OmniRoute.
 - **Fix**: Verify `gateway/main.py` has Referer-based routing enabled:
   ```python
   is_omniroute_referer = "/dashboard" in referer or "/omniroute" in referer or "/providers" in referer
