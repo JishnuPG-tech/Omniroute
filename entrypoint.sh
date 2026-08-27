@@ -77,25 +77,51 @@ for target in set(targets):
         pass
 " 2>/dev/null || true
 
-# ── STEP 1: Master Secret Validation ──────────────────────────────────────────
-if [ -z "$STORAGE_ENCRYPTION_KEY" ]; then
-    echo "[WARN] STORAGE_ENCRYPTION_KEY is not set in secrets; generating dynamic 32-hex key."
+# ── STEP 1: Master Secret Validation & Persistent Encryption Keys ─────────────
+mkdir -p /data/omniroute 2>/dev/null || true
+
+if [ -n "$STORAGE_ENCRYPTION_KEY" ]; then
+    echo "$STORAGE_ENCRYPTION_KEY" > /data/omniroute/.storage_encryption_key 2>/dev/null || true
+elif [ -f "/data/omniroute/.storage_encryption_key" ] && [ -s "/data/omniroute/.storage_encryption_key" ]; then
+    export STORAGE_ENCRYPTION_KEY=$(cat /data/omniroute/.storage_encryption_key | tr -d '\r\n')
+    echo "[PERSISTENCE] Loaded persistent STORAGE_ENCRYPTION_KEY from /data/omniroute/.storage_encryption_key"
+else
     export STORAGE_ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))" 2>/dev/null || echo "omniroute_default_storage_key_32bytes")
+    echo "$STORAGE_ENCRYPTION_KEY" > /data/omniroute/.storage_encryption_key 2>/dev/null || true
+    echo "[PERSISTENCE] Generated and saved persistent STORAGE_ENCRYPTION_KEY to /data/omniroute"
 fi
 
-if [ -z "$JWT_SECRET" ]; then
-    echo "[WARN] JWT_SECRET is not set in secrets; generating dynamic 32-hex key."
+if [ -n "$JWT_SECRET" ]; then
+    echo "$JWT_SECRET" > /data/omniroute/.jwt_secret 2>/dev/null || true
+elif [ -f "/data/omniroute/.jwt_secret" ] && [ -s "/data/omniroute/.jwt_secret" ]; then
+    export JWT_SECRET=$(cat /data/omniroute/.jwt_secret | tr -d '\r\n')
+    echo "[PERSISTENCE] Loaded persistent JWT_SECRET from /data/omniroute/.jwt_secret"
+else
     export JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))" 2>/dev/null || echo "omniroute_default_jwt_secret_key_32bytes")
+    echo "$JWT_SECRET" > /data/omniroute/.jwt_secret 2>/dev/null || true
+    echo "[PERSISTENCE] Generated and saved persistent JWT_SECRET to /data/omniroute"
 fi
 
-if [ -z "$API_KEY_SECRET" ]; then
-    echo "[WARN] API_KEY_SECRET is not set in secrets; generating dynamic 32-hex key."
+if [ -n "$API_KEY_SECRET" ]; then
+    echo "$API_KEY_SECRET" > /data/omniroute/.api_key_secret 2>/dev/null || true
+elif [ -f "/data/omniroute/.api_key_secret" ] && [ -s "/data/omniroute/.api_key_secret" ]; then
+    export API_KEY_SECRET=$(cat /data/omniroute/.api_key_secret | tr -d '\r\n')
+    echo "[PERSISTENCE] Loaded persistent API_KEY_SECRET from /data/omniroute/.api_key_secret"
+else
     export API_KEY_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))" 2>/dev/null || echo "omniroute_default_api_key_secret_32bytes")
+    echo "$API_KEY_SECRET" > /data/omniroute/.api_key_secret 2>/dev/null || true
+    echo "[PERSISTENCE] Generated and saved persistent API_KEY_SECRET to /data/omniroute"
 fi
 
 if [ -z "$INITIAL_PASSWORD" ]; then
-    echo "[WARN] INITIAL_PASSWORD is not set in secrets; using default admin password."
-    export INITIAL_PASSWORD="admin123"
+    if [ -f "/data/omniroute/.initial_password" ] && [ -s "/data/omniroute/.initial_password" ]; then
+        export INITIAL_PASSWORD=$(cat /data/omniroute/.initial_password | tr -d '\r\n')
+    else
+        export INITIAL_PASSWORD="admin123"
+        echo "$INITIAL_PASSWORD" > /data/omniroute/.initial_password 2>/dev/null || true
+    fi
+else
+    echo "$INITIAL_PASSWORD" > /data/omniroute/.initial_password 2>/dev/null || true
 fi
 
 export ENCRYPTION_SECRET="${STORAGE_ENCRYPTION_KEY}"
@@ -339,6 +365,8 @@ echo "[BOOT] Background services starting asynchronously..."
     export RATE_LIMIT_MAX=100000
     export RATE_LIMIT_WINDOW_MS=1000
     export TRUST_PROXY=true
+    export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-$HF_TOKEN}"
+    export HF_TOKEN="${HF_TOKEN:-$HUGGINGFACE_API_KEY}"
 
     if [ -d "/omniroute" ]; then
         cd /omniroute
