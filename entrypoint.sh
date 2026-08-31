@@ -387,6 +387,26 @@ echo "[BOOT] Background services starting asynchronously..."
     export GITHUB_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
     export ANTIGRAVITY_API_KEY="${ANTIGRAVITY_API_KEY:-${ANTIGRAVITY_TOKEN:-}}"
 
+    # ── Restore Persistent Credential Vault into Environment ──────────────────
+    if [ -f "/data/omniroute/credentials_vault.json" ]; then
+        echo "[VAULT] Restoring persistent provider secrets from /data/omniroute/credentials_vault.json..."
+        python3 -c "
+import json
+try:
+    with open('/data/omniroute/credentials_vault.json', 'r', encoding='utf-8') as f:
+        v = json.load(f)
+    for k, val in v.items():
+        if k and val:
+            print(f'export {k}=\"{val}\"')
+except Exception:
+    pass
+" > /tmp/vault_env.sh 2>/dev/null || true
+        if [ -f "/tmp/vault_env.sh" ]; then
+            . /tmp/vault_env.sh
+            rm -f /tmp/vault_env.sh
+        fi
+    fi
+
     if [ -d "/omniroute" ]; then
         cd /omniroute
         if [ -f "/fix_omniroute.py" ]; then
