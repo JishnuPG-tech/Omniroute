@@ -146,6 +146,35 @@ def handle_captured_credential(provider_hint: str, api_key: str):
     save_to_local_vault(env_name, api_key_str)
     sync_secret_to_huggingface(env_name, api_key_str)
 
+def flush_omniroute_db():
+    """Flushes SQLite WAL buffer and atomically syncs runtime db to persistent storage."""
+    import sqlite3
+    src = "/root/.omniroute/storage.sqlite"
+    dst = "/data/omniroute/storage.sqlite"
+    if not os.path.exists(src) or os.path.getsize(src) == 0:
+        return
+    try:
+        os.makedirs("/data/omniroute", exist_ok=True)
+        conn = sqlite3.connect(src)
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        conn.commit()
+        conn.close()
+
+        tmp_dst = f"{dst}.tmp"
+        src_conn = sqlite3.connect(src)
+        dst_conn = sqlite3.connect(tmp_dst)
+        src_conn.backup(dst_conn)
+        src_conn.close()
+        dst_conn.close()
+
+        if os.path.exists(tmp_dst) and os.path.getsize(tmp_dst) > 0:
+            os.replace(tmp_dst, dst)
+            logger.info(f"[PERSISTENCE] Flushed {os.path.getsize(dst)} bytes to persistent volume ({dst})")
+
+        sync_sqlite_credentials_to_vault(src)
+    except Exception as e:
+        logger.warning(f"[PERSISTENCE] flush_omniroute_db error: {e}")
+
 def sync_sqlite_credentials_to_vault(db_path="/root/.omniroute/storage.sqlite"):
     """Scans OmniRoute SQLite database for any newly configured providers and syncs them."""
     import sqlite3
@@ -157,15 +186,15 @@ def sync_sqlite_credentials_to_vault(db_path="/root/.omniroute/storage.sqlite"):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = [t[0] for t in cursor.fetchall()]
         
-        # Check connections table
-        for tbl in ["connections", "provider_connections", "keys"]:
+        # Check connections and provider tables
+        for tbl in ["connections", "provider_connections", "keys", "providers"]:
             if tbl in tables:
                 cursor.execute(f"SELECT * FROM {tbl}")
                 rows = cursor.fetchall()
                 col_names = [d[0].lower() for d in cursor.description]
                 for r in rows:
                     row_dict = dict(zip(col_names, r))
-                    provider = str(row_dict.get("provider_id") or row_dict.get("provider") or row_dict.get("name") or "")
+                    provider = str(row_dict.get("provider_id") or row_dict.get("provider") or row_dict.get("name") or row_dict.get("id") or "")
                     key_val = str(row_dict.get("api_key") or row_dict.get("key") or row_dict.get("token") or row_dict.get("credentials") or "")
                     if provider and key_val and len(key_val) > 5 and not key_val.startswith("enc:"):
                         handle_captured_credential(provider, key_val)

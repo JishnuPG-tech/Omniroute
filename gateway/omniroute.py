@@ -144,7 +144,7 @@ async def omniroute_dashboard(request: Request, path: str = ""):
     target = f"http://127.0.0.1:{OMNIROUTE_PORT}{req_path}"
     return await handle_omniroute_proxy(target, request, default_prefix="/omniroute", html_fixup=fixup_omniroute_html)
 
-from gateway.credentials_sync import handle_captured_credential
+from gateway.credentials_sync import handle_captured_credential, flush_omniroute_db
 
 async def try_capture_credentials(request: Request, path_hint: str = ""):
     """Inspects write payloads to automatically capture and sync API keys."""
@@ -172,14 +172,20 @@ async def try_capture_credentials(request: Request, path_hint: str = ""):
 async def omniroute_connections(request: Request, path: str = ""):
     await try_capture_credentials(request, path_hint=path)
     target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/connections/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/connections"
-    return await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+    res = await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        asyncio.create_task(asyncio.to_thread(flush_omniroute_db))
+    return res
 
 @router.api_route("/api/keys", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/keys/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def omniroute_keys(request: Request, path: str = ""):
     await try_capture_credentials(request, path_hint=path)
     target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/keys/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/keys"
-    return await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+    res = await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        asyncio.create_task(asyncio.to_thread(flush_omniroute_db))
+    return res
 
 @router.api_route("/api/providers", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/providers/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
@@ -189,6 +195,8 @@ async def omniroute_providers(request: Request, path: str = ""):
     target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/providers/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/providers"
     try:
         res = await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            asyncio.create_task(asyncio.to_thread(flush_omniroute_db))
         if res.status_code in (401, 403, 404, 500, 502) and "models" in path:
             return JSONResponse(content={"status": "unconnected", "models": [], "connected": False}, status_code=200)
         return res
@@ -231,7 +239,10 @@ async def omniroute_auth_login(request: Request, path: str = "login"):
 async def omniroute_oauth(request: Request, path: str = ""):
     await try_capture_credentials(request, path_hint=path)
     target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/oauth/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/oauth"
-    return await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+    res = await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        asyncio.create_task(asyncio.to_thread(flush_omniroute_db))
+    return res
 
 # ── OpenAI API Endpoint Routing (20128) ─────────────────────────────────────
 @router.api_route("/v1", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])

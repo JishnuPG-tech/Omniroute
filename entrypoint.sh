@@ -642,5 +642,8 @@ while true; do
         HERMES_PID=$!
     fi
 
-    sleep 5
+    # Live background sync of database & credentials vault every 10 seconds
+    sync_omniroute_db >/dev/null 2>&1 || true
+
+    sleep 10
 done
