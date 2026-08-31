@@ -122,8 +122,54 @@ def sync_secret_to_huggingface(secret_name: str, secret_val: str):
 
 def handle_captured_credential(provider_hint: str, api_key: str):
     """High-level dispatch to save locally and attempt HF cloud sync."""
-    if not api_key or len(api_key.strip()) < 5:
+    if not api_key:
         return
+    api_key_str = str(api_key).strip()
+    if len(api_key_str) < 5:
+        return
+    
+    # Check if this is a structured JSON string (like Antigravity OAuth object)
+    if api_key_str.startswith("{") and api_key_str.endswith("}"):
+        try:
+            parsed = json.loads(api_key_str)
+            if isinstance(parsed, dict):
+                # Extract refresh token or access token if available
+                rt = parsed.get("refresh_token") or parsed.get("token") or parsed.get("access_token")
+                if rt and isinstance(rt, str):
+                    env_name = normalize_provider_name(provider_hint)
+                    save_to_local_vault(env_name, rt)
+                    sync_secret_to_huggingface(env_name, rt)
+        except Exception:
+            pass
+
     env_name = normalize_provider_name(provider_hint)
-    save_to_local_vault(env_name, api_key.strip())
-    sync_secret_to_huggingface(env_name, api_key.strip())
+    save_to_local_vault(env_name, api_key_str)
+    sync_secret_to_huggingface(env_name, api_key_str)
+
+def sync_sqlite_credentials_to_vault(db_path="/root/.omniroute/storage.sqlite"):
+    """Scans OmniRoute SQLite database for any newly configured providers and syncs them."""
+    import sqlite3
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [t[0] for t in cursor.fetchall()]
+        
+        # Check connections table
+        for tbl in ["connections", "provider_connections", "keys"]:
+            if tbl in tables:
+                cursor.execute(f"SELECT * FROM {tbl}")
+                rows = cursor.fetchall()
+                col_names = [d[0].lower() for d in cursor.description]
+                for r in rows:
+                    row_dict = dict(zip(col_names, r))
+                    provider = str(row_dict.get("provider_id") or row_dict.get("provider") or row_dict.get("name") or "")
+                    key_val = str(row_dict.get("api_key") or row_dict.get("key") or row_dict.get("token") or row_dict.get("credentials") or "")
+                    if provider and key_val and len(key_val) > 5 and not key_val.startswith("enc:"):
+                        handle_captured_credential(provider, key_val)
+        conn.close()
+    except Exception as e:
+        logger.debug(f"[VAULT] SQLite scan skipped: {e}")
+

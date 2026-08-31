@@ -146,7 +146,7 @@ async def omniroute_dashboard(request: Request, path: str = ""):
 
 from gateway.credentials_sync import handle_captured_credential
 
-async def try_capture_credentials(request: Request):
+async def try_capture_credentials(request: Request, path_hint: str = ""):
     """Inspects write payloads to automatically capture and sync API keys."""
     if request.method in ("POST", "PUT", "PATCH"):
         try:
@@ -154,8 +154,13 @@ async def try_capture_credentials(request: Request):
             if body:
                 data = json.loads(body.decode("utf-8", "ignore"))
                 if isinstance(data, dict):
-                    api_key = data.get("apiKey") or data.get("api_key") or data.get("key") or data.get("token")
-                    provider_hint = data.get("provider") or data.get("providerId") or data.get("name") or data.get("id") or ""
+                    api_key = (
+                        data.get("apiKey") or data.get("api_key") or 
+                        data.get("key") or data.get("token") or 
+                        data.get("credentials") or data.get("refreshToken") or 
+                        data.get("code") or data.get("raw")
+                    )
+                    provider_hint = data.get("provider") or data.get("providerId") or data.get("name") or data.get("id") or path_hint or ""
                     if api_key and isinstance(api_key, str) and len(api_key.strip()) > 5:
                         handle_captured_credential(str(provider_hint), api_key.strip())
         except Exception:
@@ -165,15 +170,22 @@ async def try_capture_credentials(request: Request):
 @router.api_route("/api/connections/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/connection/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def omniroute_connections(request: Request, path: str = ""):
-    await try_capture_credentials(request)
+    await try_capture_credentials(request, path_hint=path)
     target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/connections/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/connections"
+    return await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
+
+@router.api_route("/api/keys", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+@router.api_route("/api/keys/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+async def omniroute_keys(request: Request, path: str = ""):
+    await try_capture_credentials(request, path_hint=path)
+    target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/keys/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/keys"
     return await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
 
 @router.api_route("/api/providers", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/providers/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/v1/providers/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def omniroute_providers(request: Request, path: str = ""):
-    await try_capture_credentials(request)
+    await try_capture_credentials(request, path_hint=path)
     target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/providers/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/providers"
     try:
         res = await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
@@ -217,6 +229,7 @@ async def omniroute_auth_login(request: Request, path: str = "login"):
 @router.api_route("/api/oauth", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/oauth/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def omniroute_oauth(request: Request, path: str = ""):
+    await try_capture_credentials(request, path_hint=path)
     target = f"http://127.0.0.1:{OMNIROUTE_PORT}/api/oauth/{path}" if path else f"http://127.0.0.1:{OMNIROUTE_PORT}/api/oauth"
     return await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
 

@@ -101,6 +101,11 @@ def run_health_check_cycle():
 
     check_disk_space()
     purge_old_backups()
+    try:
+        from gateway.credentials_sync import sync_sqlite_credentials_to_vault
+        sync_sqlite_credentials_to_vault("/root/.omniroute/storage.sqlite")
+    except Exception:
+        pass
 
 
 def main():
