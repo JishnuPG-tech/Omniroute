@@ -365,8 +365,27 @@ echo "[BOOT] Background services starting asynchronously..."
     export RATE_LIMIT_MAX=100000
     export RATE_LIMIT_WINDOW_MS=1000
     export TRUST_PROXY=true
-    export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-$HF_TOKEN}"
+
+    # ── Master Provider API Keys & Secrets Auto-Discovery ─────────────────────
+    export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+    export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${CLAUDE_API_KEY:-}}"
+    export GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-${GOOGLE_GENAI_API_KEY:-}}}"
+    export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
+    export GROQ_API_KEY="${GROQ_API_KEY:-}"
+    export NVIDIA_API_KEY="${NVIDIA_API_KEY:-${NVIDIA_NIM_API_KEY:-}}"
+    export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}}"
     export HF_TOKEN="${HF_TOKEN:-$HUGGINGFACE_API_KEY}"
+    export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+    export MISTRAL_API_KEY="${MISTRAL_API_KEY:-}"
+    export COHERE_API_KEY="${COHERE_API_KEY:-}"
+    export MOONSHOT_API_KEY="${MOONSHOT_API_KEY:-${KIMI_API_KEY:-}}"
+    export TOGETHER_API_KEY="${TOGETHER_API_KEY:-}"
+    export FIREWORKS_API_KEY="${FIREWORKS_API_KEY:-}"
+    export CEREBRAS_API_KEY="${CEREBRAS_API_KEY:-}"
+    export PERPLEXITY_API_KEY="${PERPLEXITY_API_KEY:-}"
+    export XAI_API_KEY="${XAI_API_KEY:-}"
+    export GITHUB_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    export ANTIGRAVITY_API_KEY="${ANTIGRAVITY_API_KEY:-${ANTIGRAVITY_TOKEN:-}}"
 
     if [ -d "/omniroute" ]; then
         cd /omniroute
