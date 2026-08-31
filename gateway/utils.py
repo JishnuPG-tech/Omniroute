@@ -201,7 +201,7 @@ async def proxy_http_request(
                 await asyncio.sleep(0.1 * attempt)
                 continue
             break
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as exc:
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.HTTPError) as exc:
             last_exc = exc
             if attempt < 3:
                 await asyncio.sleep(0.3 * attempt)
