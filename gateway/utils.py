@@ -110,9 +110,10 @@ def get_client_ip(request: Request) -> str:
 
 def build_upstream_headers(request: Request, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     headers = {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in _HOP_BY_HOP_HEADERS and k.lower() not in ("host", "user-agent")
-    }
+    k: v for k, v in request.headers.items()
+    if k.lower() not in _HOP_BY_HOP_HEADERS
+    and k.lower() not in ("host", "user-agent", "accept-encoding")
+} 
     client_ip = get_client_ip(request)
     headers["Host"]              = PUBLIC_HOST
     headers["X-Forwarded-Host"]  = PUBLIC_HOST
