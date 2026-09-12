@@ -121,6 +121,10 @@ def build_upstream_headers(request: Request, extra_headers: Optional[Dict[str, s
     headers["X-Real-IP"]         = client_ip
     headers["X-Forwarded-For"]   = f"{client_ip}, 127.0.0.1"
     headers["User-Agent"]        = request.headers.get("user-agent") or "Python-urllib/3.11"
+    # Prevent compressed upstream responses from being forwarded incorrectly.
+    # The proxy strips Content-Encoding from downstream responses.
+    headers["Accept-Encoding"] = "identity"
+
     if extra_headers:
         for ek, ev in extra_headers.items():
             for existing_k in list(headers.keys()):
