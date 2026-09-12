@@ -17,8 +17,11 @@ router = APIRouter(tags=["Jellyfin"])
 async def jellyfin_main_route(request: Request, path: str = ""):
     target = f"http://127.0.0.1:{JELLYFIN_PORT}/{path}"
     return await proxy_http_request(
-        target,
-        request,
-        default_prefix="/jellyfin",
-        extra_headers={"X-Forwarded-Prefix": "/jellyfin"},
-    )
+    target,
+    request,
+    default_prefix="/jellyfin",
+    extra_headers={
+        "X-Forwarded-Prefix": "/jellyfin",
+        "Accept-Encoding": "identity",
+    },
+)
