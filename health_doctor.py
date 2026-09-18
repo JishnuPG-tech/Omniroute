@@ -22,7 +22,6 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 TARGET_DATABASES = [
-    "/root/.omniroute/storage.sqlite",
     "/data/omniroute/storage.sqlite",
 ]
 

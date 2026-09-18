@@ -14,6 +14,8 @@ ENV XDG_DATA_HOME=/data/share
 ENV XDG_CONFIG_HOME=/data/config
 ENV XDG_CACHE_HOME=/root/.cache
 ENV XDG_STATE_HOME=/data/state
+ENV DATA_DIR=/data/omniroute
+ENV OMNIROUTE_DATA_DIR=/data/omniroute
 ENV HOME=/root
 
 # 1. Install runtime system packages only — no build toolchain for OmniRoute
@@ -57,7 +59,7 @@ COPY --from=omniroute-source /usr/local/bin/npx  /usr/local/bin/npx
 COPY --from=omniroute-source /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 RUN mkdir -p /root/.cache /data/cache /data/omniroute
-RUN chmod -R 777 /root/.cache /data/cache /omniroute
+RUN chmod -R 777 /root/.cache /data/cache /omniroute /data/omniroute
 
 # 6. Copy Gateway Proxy Application & Entrypoint Scripts
 WORKDIR /

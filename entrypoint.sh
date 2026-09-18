@@ -32,11 +32,23 @@ git config --global --add safe.directory '*' 2>/dev/null || true
 # Step 2: Ensure persistent /data directory structure exists
 log_info "INIT" "Setting up /data persistent volume directories..."
 mkdir -p /data/share/opencode /data/config/opencode /data/cache/opencode /data/state/opencode 2>/dev/null || true
-mkdir -p /data/omniroute 2>/dev/null || true
 mkdir -p /data/jellyfin/data /data/jellyfin/config /data/jellyfin/cache /data/jellyfin/log /data/jellyfin/media/Movies /data/jellyfin/media/TVShows 2>/dev/null || true
 mkdir -p /data/hermes/memories /data/hermes/skills /data/hermes/sessions 2>/dev/null || true
 mkdir -p /root/.cache /data/cache /root/.hermes/memories /root/.hermes/skills 2>/dev/null || true
-chmod 777 /root/.cache /data/cache /data/hermes /data/omniroute 2>/dev/null || true
+
+# Fresh start for OmniRoute storage bucket data per plan
+FRESH_START_FLAG="/data/omniroute/.persistence_v1_ready"
+if [ ! -f "$FRESH_START_FLAG" ]; then
+    log_warn "RESET" "Fresh OmniRoute persistence plan requested. Purging legacy OmniRoute data from /data/omniroute..."
+    # Strictly remove ONLY old OmniRoute files and directories from the persistent bucket
+    rm -rf /data/omniroute /data/.omniroute /root/.omniroute /root/.cache/omniroute 2>/dev/null || true
+    mkdir -p /data/omniroute/backups /data/omniroute/oauth /data/omniroute/credentials /data/omniroute/call_logs /data/omniroute/runtime 2>/dev/null || true
+    touch "$FRESH_START_FLAG"
+    log_info "RESET" "Fresh OmniRoute directory created at /data/omniroute (other services like Jellyfin/TGStreamer untouched)."
+fi
+
+mkdir -p /data/omniroute/backups /data/omniroute/oauth /data/omniroute/credentials /data/omniroute/call_logs /data/omniroute/runtime 2>/dev/null || true
+chmod -R 777 /root/.cache /data/cache /data/hermes /data/omniroute 2>/dev/null || true
 
 # Playwright Browser Metadata Fix for gemini-web / browser providers
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -135,133 +147,106 @@ rm -f /data/.env /data/secrets.env /data/secrets /data/config/.env /data/omnirou
 
 echo "[BOOT] Secrets validated: $(get_elapsed)"
 
-# ── STEP 2: Directory Model & SQLite Snapshot Restoration ─────────────────────
-PERSIST_DIR="/data/omniroute"
-PERSIST_DB="/data/omniroute/storage.sqlite"
-BACKUP_DIR="/data/omniroute/backups"
+# ── STEP 2: Canonical Direct Persistent Storage & Preflight Gate ──────────────
+export DATA_DIR="/data/omniroute"
+export OMNIROUTE_DATA_DIR="/data/omniroute"
 
-RUNTIME_DIR="/root/.omniroute"
-RUNTIME_DB="/root/.omniroute/storage.sqlite"
-
-if [ -d "$PERSIST_DB" ]; then
-    rm -rf "$PERSIST_DB" 2>/dev/null || true
-fi
-
-mkdir -p "$PERSIST_DIR" "$BACKUP_DIR" "$RUNTIME_DIR" 2>/dev/null || true
-
-if [ -f "$PERSIST_DB" ] && [ -s "$PERSIST_DB" ]; then
-    _INIT_SIZE=$(wc -c < "$PERSIST_DB" 2>/dev/null | tr -d ' \t\n\r' || echo "0")
-    echo "[PERSISTENCE] Found OmniRoute snapshot at: ${PERSIST_DB} (${_INIT_SIZE} bytes)"
-    _RESTORED=0
-    if command -v sqlite3 >/dev/null 2>&1; then
-        _CHK=$(sqlite3 "$PERSIST_DB" "PRAGMA quick_check;" 2>/dev/null || echo "failed")
-        if [ "$_CHK" = "ok" ]; then
-            rm -f "$RUNTIME_DIR/storage.sqlite"* 2>/dev/null || true
-            cp -f "$PERSIST_DB" "$RUNTIME_DB" 2>/dev/null || true
-            echo "[PERSISTENCE] Restored persistent database into ${RUNTIME_DIR} successfully."
-            _RESTORED=1
-        elif [ -f "${BACKUP_DIR}/last-known-good.sqlite" ]; then
-            _BCHK=$(sqlite3 "${BACKUP_DIR}/last-known-good.sqlite" "PRAGMA quick_check;" 2>/dev/null || echo "failed")
-            if [ "$_BCHK" = "ok" ]; then
-                rm -f "$RUNTIME_DIR/storage.sqlite"* 2>/dev/null || true
-                cp -f "${BACKUP_DIR}/last-known-good.sqlite" "$RUNTIME_DB" 2>/dev/null || true
-                cp -f "${BACKUP_DIR}/last-known-good.sqlite" "$PERSIST_DB" 2>/dev/null || true
-                echo "[PERSISTENCE] Restored from last-known-good backup into ${RUNTIME_DB} successfully."
-                _RESTORED=1
-            fi
-        fi
+preflight_persistence_gate() {
+    log_info "PREFLIGHT" "Validating persistent storage invariants for OmniRoute..."
+    if [ ! -d "/data" ]; then
+        log_error "PREFLIGHT" "CRITICAL: /data directory does not exist! Persistent bucket not mounted."
+        return 1
     fi
-    if [ $_RESTORED -eq 0 ]; then
-        rm -f "$RUNTIME_DIR/storage.sqlite"* 2>/dev/null || true
-        cp -f "$PERSIST_DB" "$RUNTIME_DB" 2>/dev/null || true
-        echo "[PERSISTENCE] Restored persistent database snapshot directly into ${RUNTIME_DB}."
+    if [ ! -w "/data" ]; then
+        log_error "PREFLIGHT" "CRITICAL: /data is not writable!"
+        return 1
     fi
-fi
-
-# Restore supplementary state directories
-for _ITEM in oauth credentials runtime gemini_cli config_dir; do
-    if [ -d "${PERSIST_DIR}/${_ITEM}" ]; then
-        if [ "$_ITEM" = "gemini_cli" ]; then
-            mkdir -p /root/.gemini 2>/dev/null || true
-            cp -af "${PERSIST_DIR}/gemini_cli/"* /root/.gemini/ 2>/dev/null || true
-        elif [ "$_ITEM" = "config_dir" ]; then
-            mkdir -p /root/.config 2>/dev/null || true
-            cp -af "${PERSIST_DIR}/config_dir/"* /root/.config/ 2>/dev/null || true
-        else
-            mkdir -p "${RUNTIME_DIR}/${_ITEM}" 2>/dev/null || true
-            cp -af "${PERSIST_DIR}/${_ITEM}/"* "${RUNTIME_DIR}/${_ITEM}/" 2>/dev/null || true
-        fi
+    mkdir -p "$DATA_DIR/backups" "$DATA_DIR/oauth" "$DATA_DIR/credentials" "$DATA_DIR/call_logs" "$DATA_DIR/runtime" 2>/dev/null || true
+    if [ ! -w "$DATA_DIR" ]; then
+        log_error "PREFLIGHT" "CRITICAL: DATA_DIR ($DATA_DIR) is not writable!"
+        return 1
     fi
-done
 
-# Database WAL Backup Synchronization Function
-sync_omniroute_db() {
-    if [ -f "$RUNTIME_DB" ] && [ -s "$RUNTIME_DB" ]; then
-        mkdir -p "$PERSIST_DIR" "$BACKUP_DIR" 2>/dev/null || true
-        _SYNC_TMP="${PERSIST_DB}.tmp"
-        rm -f "$_SYNC_TMP" 2>/dev/null || true
+    # Touch probe to verify read-write access
+    _PROBE="$DATA_DIR/.probe_$$"
+    if ! touch "$_PROBE" 2>/dev/null; then
+        log_error "PREFLIGHT" "CRITICAL: Write probe failed in $DATA_DIR!"
+        return 1
+    fi
+    rm -f "$_PROBE" 2>/dev/null || true
 
+    # SQLite integrity check if database already exists
+    if [ -f "$DATA_DIR/storage.sqlite" ] && [ -s "$DATA_DIR/storage.sqlite" ]; then
         if command -v sqlite3 >/dev/null 2>&1; then
-            sqlite3 "$RUNTIME_DB" "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
-            sqlite3 "$RUNTIME_DB" ".backup '$_SYNC_TMP'" 2>/dev/null || cp -f "$RUNTIME_DB" "$_SYNC_TMP" 2>/dev/null || true
-        else
-            cp -f "$RUNTIME_DB" "$_SYNC_TMP" 2>/dev/null || true
-        fi
-
-        _CHK="failed"
-        if [ -f "$_SYNC_TMP" ] && [ -s "$_SYNC_TMP" ]; then
-            if command -v sqlite3 >/dev/null 2>&1; then
-                _CHK=$(sqlite3 "$_SYNC_TMP" "PRAGMA quick_check;" 2>/dev/null || echo "failed")
+            _CHK=$(sqlite3 "$DATA_DIR/storage.sqlite" "PRAGMA quick_check;" 2>/dev/null || echo "failed")
+            if [ "$_CHK" = "ok" ]; then
+                log_info "PREFLIGHT" "Existing storage.sqlite integrity verified: PRAGMA quick_check passed."
             else
-                _CHK="ok"
+                log_warn "PREFLIGHT" "storage.sqlite failed quick_check: $_CHK"
+                if [ -f "$DATA_DIR/backups/last-known-good.sqlite" ]; then
+                    _BCHK=$(sqlite3 "$DATA_DIR/backups/last-known-good.sqlite" "PRAGMA quick_check;" 2>/dev/null || echo "failed")
+                    if [ "$_BCHK" = "ok" ]; then
+                        log_warn "PREFLIGHT" "Restoring database from verified last-known-good backup..."
+                        cp -f "$DATA_DIR/backups/last-known-good.sqlite" "$DATA_DIR/storage.sqlite" 2>/dev/null || true
+                    fi
+                fi
             fi
         fi
+    else
+        log_info "PREFLIGHT" "Fresh start: storage.sqlite will be created directly by OmniRoute in $DATA_DIR"
+    fi
 
-        if [ "$_CHK" = "ok" ]; then
-            mv -f "$_SYNC_TMP" "$PERSIST_DB" 2>/dev/null || true
-            rm -f "${PERSIST_DB}-wal" "${PERSIST_DB}-shm" 2>/dev/null || true
+    log_info "PREFLIGHT" "Persistence preflight passed successfully. Single source of truth: $DATA_DIR"
+    return 0
+}
 
-            cp -f "$PERSIST_DB" "${BACKUP_DIR}/last-known-good.sqlite" 2>/dev/null || true
-            TIMESTAMP=$(date +%Y%m%d-%H%M)
-            cp -f "$PERSIST_DB" "${BACKUP_DIR}/storage-${TIMESTAMP}.sqlite" 2>/dev/null || true
-            ls -t "${BACKUP_DIR}"/storage-*.sqlite 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+preflight_persistence_gate || log_error "PREFLIGHT" "Warning: persistence preflight reported issues, continuing with best effort."
 
-            for _ITEM in oauth credentials runtime; do
-                if [ -d "${RUNTIME_DIR}/${_ITEM}" ]; then
-                    mkdir -p "${PERSIST_DIR}/${_ITEM}" 2>/dev/null || true
-                    cp -af "${RUNTIME_DIR}/${_ITEM}/"* "${PERSIST_DIR}/${_ITEM}/" 2>/dev/null || true
+# SQLite-Aware Backup Routine (Scheduled & On Shutdown)
+backup_omniroute_db() {
+    _DB="$DATA_DIR/storage.sqlite"
+    _BDIR="$DATA_DIR/backups"
+    if [ -f "$_DB" ] && [ -s "$_DB" ]; then
+        mkdir -p "$_BDIR" 2>/dev/null || true
+        _TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        _BACKUP_FILE="$_BDIR/storage-${_TIMESTAMP}.sqlite"
+        if command -v sqlite3 >/dev/null 2>&1; then
+            sqlite3 "$_DB" "PRAGMA wal_checkpoint(PASSIVE);" 2>/dev/null || true
+            sqlite3 "$_DB" ".backup '$_BACKUP_FILE'" 2>/dev/null || cp -f "$_DB" "$_BACKUP_FILE" 2>/dev/null || true
+            if [ -f "$_BACKUP_FILE" ] && [ -s "$_BACKUP_FILE" ]; then
+                _BCHK=$(sqlite3 "$_BACKUP_FILE" "PRAGMA quick_check;" 2>/dev/null || echo "failed")
+                if [ "$_BCHK" = "ok" ]; then
+                    cp -f "$_BACKUP_FILE" "$_BDIR/last-known-good.sqlite" 2>/dev/null || true
+                    ls -t "$_BDIR"/storage-*.sqlite 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+                    log_info "BACKUP" "Clean SQLite backup created: $_BACKUP_FILE"
+                else
+                    rm -f "$_BACKUP_FILE" 2>/dev/null || true
+                    log_warn "BACKUP" "Backup failed integrity check; discarded."
                 fi
-            done
-
-            if [ -d "/root/.gemini" ]; then
-                mkdir -p "${PERSIST_DIR}/gemini_cli" 2>/dev/null || true
-                cp -af /root/.gemini/* "${PERSIST_DIR}/gemini_cli/" 2>/dev/null || true
             fi
-
-            if [ -d "/root/.config" ]; then
-                mkdir -p "${PERSIST_DIR}/config_dir" 2>/dev/null || true
-                cp -af /root/.config/* "${PERSIST_DIR}/config_dir/" 2>/dev/null || true
-            fi
-            _SIZE=$(wc -c < "$PERSIST_DB" 2>/dev/null | tr -d ' \t\n\r' || echo "0")
-            echo "[PERSISTENCE] Snapshot OK: ${_SIZE} bytes synced to ${PERSIST_DB}"
-        else
-            rm -f "$_SYNC_TMP" 2>/dev/null || true
-            echo "[PERSISTENCE] WARNING: Database backup quick_check failed; skipping snapshot."
         fi
     fi
 }
 
 shutdown_gracefully() {
-    echo "[SHUTDOWN] Process termination signal received. Flushing persistence state..."
+    log_info "SHUTDOWN" "Process termination signal received. Flushing persistence state..."
     if [ -n "$OMNIROUTE_PID" ] && kill -0 $OMNIROUTE_PID 2>/dev/null; then
         kill -INT $OMNIROUTE_PID 2>/dev/null || true
+        for _i in $(seq 1 10); do
+            if ! kill -0 $OMNIROUTE_PID 2>/dev/null; then
+                break
+            fi
+            sleep 1
+        done
     fi
     if [ -n "$HERMES_PID" ] && kill -0 $HERMES_PID 2>/dev/null; then
         kill -INT $HERMES_PID 2>/dev/null || true
     fi
-    sleep 2
-    sync_omniroute_db >/dev/null 2>&1 || true
-    echo "[SHUTDOWN] Persistence sync finished cleanly. Container exiting."
+    if [ -f "$DATA_DIR/storage.sqlite" ] && command -v sqlite3 >/dev/null 2>&1; then
+        sqlite3 "$DATA_DIR/storage.sqlite" "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
+        backup_omniroute_db >/dev/null 2>&1 || true
+    fi
+    log_info "SHUTDOWN" "Persistence checkpoint complete. Container exiting."
     exit 0
 }
 
@@ -316,14 +301,15 @@ echo "[BOOT] Background services starting asynchronously..."
         echo "[INIT] Starting Redis server on port 6379..."
         redis-server --daemonize yes 2>/dev/null || true
         if command -v redis-cli >/dev/null 2>&1; then
-            redis-cli flushall 2>/dev/null || true
+            echo "[INIT] Redis server active on port 6379."
         fi
     fi
 
     echo "[INIT] Starting OmniRoute AI Gateway..."
     export PORT=20128
     export HOSTNAME="127.0.0.1"
-    export DATA_DIR="/root/.omniroute"
+    export DATA_DIR="/data/omniroute"
+    export OMNIROUTE_DATA_DIR="/data/omniroute"
     export REDIS_URL="redis://127.0.0.1:6379"
     export NEXT_PUBLIC_BASE_URL="https://jishnupg-opencode-cli.hf.space"
     export AUTH_COOKIE_SECURE="true"
@@ -428,7 +414,7 @@ except Exception:
                 if curl -fsS "http://127.0.0.1:20128/api/monitoring/health" >/dev/null 2>&1; then
                     echo "[HEALTH] OmniRoute ready after ${i}s"
                     echo "[PROCESS] OmniRoute: PID ${OMNIROUTE_PID}"
-                    sync_omniroute_db
+                    backup_omniroute_db >/dev/null 2>&1 || true
                     break
                 fi
                 sleep 1
@@ -616,6 +602,7 @@ fi
 
 # Step 12: Keep PID 1 Alive and Monitor Child Processes
 echo "[BOOT] All services dispatched. Process Supervisor active."
+BACKUP_TIMER=0
 
 while true; do
     if [ -n "$FASTAPI_PID" ] && ! kill -0 $FASTAPI_PID 2>/dev/null; then
@@ -642,8 +629,12 @@ while true; do
         HERMES_PID=$!
     fi
 
-    # Live background sync of database & credentials vault every 10 seconds
-    sync_omniroute_db >/dev/null 2>&1 || true
+    # Periodic clean SQLite backup routine every 3600 seconds (1 hour)
+    BACKUP_TIMER=$((BACKUP_TIMER + 10))
+    if [ "$BACKUP_TIMER" -ge 3600 ]; then
+        backup_omniroute_db >/dev/null 2>&1 || true
+        BACKUP_TIMER=0
+    fi
 
     sleep 10
 done
