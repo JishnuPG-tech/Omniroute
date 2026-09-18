@@ -31,20 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     redis-server \
  && rm -rf /var/lib/apt/lists/*
 
-# 2. Add Jellyfin official repo & install Jellyfin + FFmpeg
-RUN mkdir -p /etc/apt/keyrings \
- && curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg \
- && echo "deb [signed-by=/etc/apt/keyrings/jellyfin.gpg arch=amd64] https://repo.jellyfin.org/debian bookworm main" > /etc/apt/sources.list.d/jellyfin.list \
- && apt-get update && apt-get install -y --no-install-recommends jellyfin-server jellyfin-web ffmpeg \
- && rm -rf /var/lib/apt/lists/*
-
-# 3. Install core Python runtime dependencies (Lightweight, no Open WebUI)
+# 2. Install core Python runtime dependencies for Gateway
 RUN pip3 install --no-cache-dir \
-    aiohttp pyrogram tgcrypto httpx uvicorn fastapi \
-    --break-system-packages
-
-# Install hermes-agent separately with --no-deps to avoid version backtracking
-RUN pip3 install --no-cache-dir --no-deps hermes-agent \
+    aiohttp httpx uvicorn fastapi \
     --break-system-packages
 
 # 4. Copy prebuilt OmniRoute production runtime from Stage 1
@@ -66,7 +55,6 @@ WORKDIR /
 COPY entrypoint.sh /entrypoint.sh
 COPY nginx.conf /nginx.conf
 COPY proxy.py /proxy.py
-COPY tg_streamer.py /tg_streamer.py
 COPY fix_omniroute.py /fix_omniroute.py
 COPY health_doctor.py /health_doctor.py
 COPY gateway /gateway

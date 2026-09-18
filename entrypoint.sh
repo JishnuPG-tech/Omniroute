@@ -32,23 +32,21 @@ git config --global --add safe.directory '*' 2>/dev/null || true
 # Step 2: Ensure persistent /data directory structure exists
 log_info "INIT" "Setting up /data persistent volume directories..."
 mkdir -p /data/share/opencode /data/config/opencode /data/cache/opencode /data/state/opencode 2>/dev/null || true
-mkdir -p /data/jellyfin/data /data/jellyfin/config /data/jellyfin/cache /data/jellyfin/log /data/jellyfin/media/Movies /data/jellyfin/media/TVShows 2>/dev/null || true
-mkdir -p /data/hermes/memories /data/hermes/skills /data/hermes/sessions 2>/dev/null || true
-mkdir -p /root/.cache /data/cache /root/.hermes/memories /root/.hermes/skills 2>/dev/null || true
+mkdir -p /root/.cache /data/cache 2>/dev/null || true
 
 # Fresh start for OmniRoute storage bucket data per plan
 FRESH_START_FLAG="/data/omniroute/.persistence_v1_ready"
 if [ ! -f "$FRESH_START_FLAG" ]; then
-    log_warn "RESET" "Fresh OmniRoute persistence plan requested. Purging legacy OmniRoute data from /data/omniroute..."
-    # Strictly remove ONLY old OmniRoute files and directories from the persistent bucket
-    rm -rf /data/omniroute /data/.omniroute /root/.omniroute /root/.cache/omniroute 2>/dev/null || true
+    log_warn "RESET" "Fresh OmniRoute persistence plan requested. Purging legacy data from persistent storage..."
+    # Strictly remove legacy data from persistent bucket
+    rm -rf /data/omniroute /data/.omniroute /root/.omniroute /root/.cache/omniroute /data/jellyfin /data/hermes /root/.hermes /data/share 2>/dev/null || true
     mkdir -p /data/omniroute/backups /data/omniroute/oauth /data/omniroute/credentials /data/omniroute/call_logs /data/omniroute/runtime 2>/dev/null || true
     touch "$FRESH_START_FLAG"
-    log_info "RESET" "Fresh OmniRoute directory created at /data/omniroute (other services like Jellyfin/TGStreamer untouched)."
+    log_info "RESET" "Fresh OmniRoute directory created at /data/omniroute. Legacy projects removed."
 fi
 
 mkdir -p /data/omniroute/backups /data/omniroute/oauth /data/omniroute/credentials /data/omniroute/call_logs /data/omniroute/runtime 2>/dev/null || true
-chmod -R 777 /root/.cache /data/cache /data/hermes /data/omniroute 2>/dev/null || true
+chmod -R 777 /root/.cache /data/cache /data/omniroute 2>/dev/null || true
 
 # Playwright Browser Metadata Fix for gemini-web / browser providers
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -125,16 +123,9 @@ else
     echo "[PERSISTENCE] Generated and saved persistent API_KEY_SECRET to /data/omniroute"
 fi
 
-if [ -z "$INITIAL_PASSWORD" ]; then
-    if [ -f "/data/omniroute/.initial_password" ] && [ -s "/data/omniroute/.initial_password" ]; then
-        export INITIAL_PASSWORD=$(cat /data/omniroute/.initial_password | tr -d '\r\n')
-    else
-        export INITIAL_PASSWORD="admin123"
-        echo "$INITIAL_PASSWORD" > /data/omniroute/.initial_password 2>/dev/null || true
-    fi
-else
-    echo "$INITIAL_PASSWORD" > /data/omniroute/.initial_password 2>/dev/null || true
-fi
+export INITIAL_PASSWORD="${INITIAL_PASSWORD:-Jishnu2005}"
+echo "$INITIAL_PASSWORD" > /data/omniroute/.initial_password 2>/dev/null || true
+echo "[PERSISTENCE] Configured OmniRoute administrator password to persistent storage."
 
 export ENCRYPTION_SECRET="${STORAGE_ENCRYPTION_KEY}"
 export OMNIROUTE_SECRET_KEY="${STORAGE_ENCRYPTION_KEY}"
@@ -238,9 +229,6 @@ shutdown_gracefully() {
             fi
             sleep 1
         done
-    fi
-    if [ -n "$HERMES_PID" ] && kill -0 $HERMES_PID 2>/dev/null; then
-        kill -INT $HERMES_PID 2>/dev/null || true
     fi
     if [ -f "$DATA_DIR/storage.sqlite" ] && command -v sqlite3 >/dev/null 2>&1; then
         sqlite3 "$DATA_DIR/storage.sqlite" "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
@@ -422,185 +410,13 @@ except Exception:
         ) &
     fi
 
-# Step 9: Start Telegram Range Stream Proxy in Background (Port 8080)
-# Optional: disabled by default to keep cpu-basic RAM/CPU for the chat path.
-if [ "${ENABLE_TG_STREAMER:-0}" = "1" ] && [ -f "/tg_streamer.py" ]; then
-    echo "[HEALTH] Telegram streamer starting in background..."
-    python3 /tg_streamer.py > /data/cache/tg_streamer.log 2>&1 &
-    TG_PID=$!
-else
-    echo "[INIT] Telegram streamer disabled (ENABLE_TG_STREAMER!=1)"
-fi
-
+# Step 9: Start Database & Disk Health Doctor Daemon
 if [ -f "/health_doctor.py" ]; then
     echo "[HEALTH] Starting Database & Disk Health Doctor daemon..."
     python3 /health_doctor.py > /data/cache/health_doctor.log 2>&1 &
 fi
 
-# Step 10: Start Jellyfin Media Server in Background (Port 8096)
-# Optional: disabled by default — Jellyfin media scans starve OmniRoute on
-# cpu-basic and cause multi-minute "Service initializing" windows.
-WEBDIR_OPT=""
-if [ -d "/usr/share/jellyfin/web" ]; then
-    WEBDIR_OPT="--webdir /usr/share/jellyfin/web"
-fi
-
-if [ "${ENABLE_JELLYFIN:-0}" = "1" ]; then
-    if command -v jellyfin >/dev/null 2>&1; then
-        echo "[HEALTH] Jellyfin starting in background..."
-        jellyfin --datadir /data/jellyfin/data --configdir /data/jellyfin/config --cachedir /data/jellyfin/cache --logdir /data/jellyfin/log $WEBDIR_OPT > /data/jellyfin/log/jellyfin.log 2>&1 &
-        JELLYFIN_PID=$!
-    elif [ -f "/usr/bin/jellyfin" ]; then
-        echo "[HEALTH] Jellyfin binary starting in background..."
-        /usr/bin/jellyfin --datadir /data/jellyfin/data --configdir /data/jellyfin/config --cachedir /data/jellyfin/cache --logdir /data/jellyfin/log $WEBDIR_OPT > /data/jellyfin/log/jellyfin.log 2>&1 &
-        JELLYFIN_PID=$!
-    fi
-else
-    echo "[INIT] Jellyfin disabled (ENABLE_JELLYFIN!=1)"
-fi
-
-# Step 11: Start Hermes Agent in Background (Port 8642)
-if true; then
-    echo "[HEALTH] Hermes Agent starting in background on port 8642..."
-    mkdir -p /data/hermes/memories /data/hermes/skills /data/hermes/sessions 2>/dev/null || true
-    chmod -R 777 /data/hermes 2>/dev/null || true
-    if [ -d "/data/hermes" ] && [ "$(ls -A /data/hermes 2>/dev/null)" ]; then
-        rsync -a /data/hermes/. /root/.hermes/ 2>/dev/null || \
-            cp -rf /data/hermes/. /root/.hermes/ 2>/dev/null || true
-        echo "[PERSISTENCE] Restored Hermes memory from /data/hermes"
-    fi
-
-    # Create global Python sitecustomize.py to enforce OmniRoute API base for all LLM calls
-    for _SITEDIR in "/usr/local/lib/python3.11/dist-packages" "/usr/lib/python3.11" "/root/.hermes"; do
-        if [ -d "$_SITEDIR" ]; then
-            cat > "${_SITEDIR}/sitecustomize.py" << 'PYCUSTOM'
-import os
-os.environ["OPENAI_API_BASE"] = "http://127.0.0.1:20128/v1"
-os.environ["OPENAI_API_BASE_URL"] = "http://127.0.0.1:20128/v1"
-os.environ["OPENAI_BASE_URL"] = "http://127.0.0.1:20128/v1"
-os.environ["OPENAI_API_KEY"] = os.getenv("OMNIROUTE_API_KEY", "sk-6646a5f2024f6318-d27ff7-f3e152c8")
-os.environ["HERMES_API_BASE_URL"] = "http://127.0.0.1:20128/v1"
-os.environ["HERMES_API_KEY"] = os.getenv("OMNIROUTE_API_KEY", "sk-6646a5f2024f6318-d27ff7-f3e152c8")
-PYCUSTOM
-        fi
-    done
-    export PYTHONPATH="/:/root/.hermes:/usr/local/lib/python3.11/dist-packages:${PYTHONPATH}"
-
-    if [ -n "${HERMES_API_KEY}" ] && [ "${HERMES_API_KEY}" != "sk-6646a5f2024f6318-d27ff7-f3e152c8" ] && [ "${HERMES_API_KEY}" != "admin123" ]; then
-        export HF_HERMES_API_KEY="${HERMES_API_KEY}"
-    fi
-
-    HERMES_LLM_KEY="${OMNIROUTE_API_KEY:-sk-6646a5f2024f6318-d27ff7-f3e152c8}"
-    export HERMES_API_BASE_URL="http://127.0.0.1:8000/v1"
-    export HERMES_API_KEY="${HERMES_LLM_KEY}"
-    export OPENAI_API_BASE="http://127.0.0.1:8000/v1"
-    export OPENAI_API_KEY="${HERMES_LLM_KEY}"
-    export HERMES_MODEL="${HERMES_MODEL:-antigravity/gemini-3.6-flash-medium}"
-    export HERMES_DATA_DIR="/root/.hermes"
-    export HERMES_GATEWAY_PORT=8642
-    export HERMES_PORT=8642
-    export PORT=8642
-    export API_SERVER_ENABLED=true
-    export API_SERVER_PORT=8642
-    export API_SERVER_HOST=127.0.0.1
-    export API_SERVER_KEY="${HF_HERMES_API_KEY:-${HERMES_GATEWAY_API_KEY:-${HERMES_API_KEY_SECRET:-${API_KEY_SECRET:-${INITIAL_PASSWORD:-sk-6646a5f2024f6318-d27ff7-f3e152c8}}}}}"
-    export HERMES_GATEWAY_API_KEY="${API_SERVER_KEY}"
-    export HERMES_GATEWAY_ENABLED=true
-
-    cat > /root/.hermes/.env << HERMES_ENV
-API_SERVER_ENABLED=true
-API_SERVER_PORT=8642
-API_SERVER_HOST=127.0.0.1
-API_SERVER_KEY=${API_SERVER_KEY}
-OPENAI_API_BASE=http://127.0.0.1:8000/v1
-OPENAI_API_BASE_URL=http://127.0.0.1:8000/v1
-OPENAI_API_KEY=${HERMES_LLM_KEY}
-HERMES_API_BASE_URL=http://127.0.0.1:8000/v1
-HERMES_API_KEY=${HERMES_LLM_KEY}
-DEFAULT_MODEL=${HERMES_MODEL}
-TELEGRAM_ENABLED=${TELEGRAM_BOT_TOKEN:+true}
-TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-TELEGRAM_ALLOW_ALL_USERS=true
-TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-*}
-HERMES_ENV
-
-    cat > /root/.hermes/config.json << HERMES_CFG
-{
-  "api_base_url": "http://127.0.0.1:8000/v1",
-  "api_key": "${HERMES_LLM_KEY}",
-  "model": "${HERMES_MODEL}",
-  "data_dir": "/root/.hermes",
-  "api_server": {
-    "enabled": true,
-    "port": 8642,
-    "host": "127.0.0.1",
-    "key": "${API_SERVER_KEY}"
-  },
-  "gateway": {
-    "enabled": true,
-    "port": 8642,
-    "api_key": "${API_SERVER_KEY}"
-  },
-  "memory": {
-    "enabled": true,
-    "sqlite_fts5": true,
-    "memory_file": "/root/.hermes/memories/MEMORY.md",
-    "user_file": "/root/.hermes/memories/USER.md"
-  },
-  "tools": {
-    "web_search": true,
-    "web_extract": true,
-    "browser_automation": true
-  },
-  "stt": {
-    "enabled": false
-  },
-  "tts": {
-    "enabled": false
-  }
-}
-HERMES_CFG
-
-    mkdir -p /data/hermes 2>/dev/null || true
-    cp -f /root/.hermes/.env /data/hermes/.env 2>/dev/null || true
-    cp -f /root/.hermes/config.json /data/hermes/config.json 2>/dev/null || true
-
-    if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
-        export HERMES_TELEGRAM_TOKEN="$TELEGRAM_BOT_TOKEN"
-        export HERMES_TELEGRAM_ENABLED=true
-        export TELEGRAM_ALLOW_ALL_USERS=true
-        export TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-*}"
-        echo "[HERMES] Telegram bot integration enabled"
-    fi
-
-    HERMES_START_CMD=""
-    if python3 -c "import hermes; print(hermes)" >/dev/null 2>&1 && hermes gateway --help >/dev/null 2>&1; then
-        HERMES_START_CMD="hermes gateway"
-    else
-        HERMES_START_CMD="python3 -m uvicorn gateway.hermes_standalone:app --host 127.0.0.1 --port 8642"
-    fi
-
-    if [ -n "$HERMES_START_CMD" ]; then
-        $HERMES_START_CMD 2>&1 | tee /data/cache/hermes.log | sed 's/^/[HERMES] /' &
-        HERMES_PID=$!
-        echo "[PROCESS] Hermes Agent: PID ${HERMES_PID}"
-        for i in $(seq 1 30); do
-            if ! kill -0 $HERMES_PID 2>/dev/null; then
-                echo "[HERMES] ERROR: Process died immediately."
-                HERMES_PID=""
-                break
-            fi
-            if curl -fsS "http://127.0.0.1:8642/health" >/dev/null 2>&1 || \
-               curl -fsS "http://127.0.0.1:8642/v1/models" >/dev/null 2>&1; then
-                echo "[HEALTH] Hermes Agent ready after ${i}s"
-                break
-            fi
-            sleep 1
-        done
-    fi
-fi
-
-# Step 12: Keep PID 1 Alive and Monitor Child Processes
+# Step 10: Keep PID 1 Alive and Monitor Child Processes
 echo "[BOOT] All services dispatched. Process Supervisor active."
 BACKUP_TIMER=0
 
@@ -621,12 +437,6 @@ while true; do
         echo "[CRITICAL] OmniRoute process died! Restarting..."
         (cd /omniroute && node server.js) > /data/omniroute/omniroute.log 2>&1 &
         OMNIROUTE_PID=$!
-    fi
-
-    if [ -n "$HERMES_PID" ] && [ -n "$HERMES_START_CMD" ] && ! kill -0 $HERMES_PID 2>/dev/null; then
-        echo "[CRITICAL] Hermes Agent process died! Restarting..."
-        $HERMES_START_CMD 2>&1 | tee /data/cache/hermes.log | sed 's/^/[HERMES] /' &
-        HERMES_PID=$!
     fi
 
     # Periodic clean SQLite backup routine every 3600 seconds (1 hour)

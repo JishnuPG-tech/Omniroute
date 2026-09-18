@@ -20,16 +20,10 @@ from gateway.utils import (
     get_http_client,
     proxy_http_request,
     get_structured_logger,
-    HERMES_PORT,
-    JELLYFIN_PORT,
-    TG_PORT,
     OMNIROUTE_PORT,
     PUBLIC_HOST,
 )
 from gateway.omniroute import router as omniroute_router, omniroute_main_route
-from gateway.jellyfin import router as jellyfin_router
-from gateway.tg_stream import router as tg_stream_router
-from gateway.hermes import router as hermes_router
 
 logger = get_structured_logger("GatewayMain")
 
@@ -43,13 +37,10 @@ async def lifespan(app: FastAPI):
         await client.aclose()
 
 
-app = FastAPI(title="OpenCode Space Gateway", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="OmniRoute AI Gateway", lifespan=lifespan, docs_url=None, redoc_url=None)
 
-# Include Service Routers
+# Include OmniRoute Router
 app.include_router(omniroute_router)
-app.include_router(jellyfin_router)
-app.include_router(tg_stream_router)
-app.include_router(hermes_router)
 
 
 # ── Lightweight Platform Readiness Endpoint ──────────────────────────────────
@@ -118,9 +109,6 @@ async def health_check():
     client = get_http_client()
     services = {
         "omniroute": f"http://127.0.0.1:{OMNIROUTE_PORT}/",
-        "hermes":    f"http://127.0.0.1:{HERMES_PORT}/health",
-        "jellyfin":  f"http://127.0.0.1:{JELLYFIN_PORT}/",
-        "tg_stream": f"http://127.0.0.1:{TG_PORT}/",
     }
     results = {}
     for name, url in services.items():
@@ -132,14 +120,11 @@ async def health_check():
     return {"gateway": "healthy", "upstreams": results}
 
 
-# ── Root Portal Route ────────────────────────────────────────────────────────
+# ── Root Portal Route: Direct to OmniRoute Dashboard ─────────────────────────
 @app.get("/")
 @app.get("/index.html")
 async def root_portal():
-    for candidate in ("/index.html", "index.html", os.path.join(os.path.dirname(__file__), "..", "index.html")):
-        if os.path.exists(candidate):
-            return FileResponse(candidate, media_type="text/html")
-    return HTMLResponse(content="<h1>OpenCode Space Gateway Online</h1><p><a href='/dashboard'>OmniRoute Dashboard</a></p>", status_code=200)
+    return RedirectResponse(url="/dashboard", status_code=302)
 
 
 # ── Catch-All Referer & Subpath Fallback Router ──────────────────────────────
@@ -233,32 +218,15 @@ async def route_catch_all(path: str, request: Request):
         or any(req_path == p or req_path.startswith(p) for p in OMNIROUTE_PREFIXES)
         or req_path in OMNIROUTE_EXACT
     ):
-        if not (req_path.startswith("/jellyfin") or req_path.startswith("/tg-stream") or req_path.startswith("/tg_stream") or req_path.startswith("/hermes") or req_path == "/health/live"):
+        if req_path != "/health/live":
             logger.info(f"[ROUTER] {req_path} (referer={referer}) -> OmniRoute ({OMNIROUTE_PORT})")
             res = await proxy_http_request(f"http://127.0.0.1:{OMNIROUTE_PORT}{req_path}", request, default_prefix="", extra_headers=extra)
             if res.status_code in (401, 403) and not req_path.startswith("/api/v1/auths"):
                 return JSONResponse(content={"status": "ok", "authenticated": False, "message": "unauthenticated"}, status_code=200)
             return res
 
-    # ── 2. Jellyfin Media Server Namespace ────────────────────────────────────
-    if req_path == "/jellyfin" or req_path.startswith("/jellyfin/"):
-        logger.info(f"[ROUTER] {req_path} -> Jellyfin ({JELLYFIN_PORT})")
-        sub_p = "/" if req_path == "/jellyfin" else req_path[len("/jellyfin"):]
-        return await proxy_http_request(f"http://127.0.0.1:{JELLYFIN_PORT}{sub_p}", request, default_prefix="/jellyfin", extra_headers={"X-Forwarded-Prefix": "/jellyfin"})
+    # ── 2. Default Fallback: Forward directly to OmniRoute ─────────────────────
+    if req_path != "/health/live":
+        return await proxy_http_request(f"http://127.0.0.1:{OMNIROUTE_PORT}{req_path}", request, default_prefix="", extra_headers=extra)
 
-    # ── 3. Telegram Streamer Namespace ────────────────────────────────────────
-    if req_path in ("/tg-stream", "/tg_stream") or req_path.startswith("/tg-stream/") or req_path.startswith("/tg_stream/"):
-        logger.info(f"[ROUTER] {req_path} -> Telegram ({TG_PORT})")
-        if req_path in ("/tg-stream", "/tg_stream"):
-            sub_p = "/"
-        elif req_path.startswith("/tg-stream/"):
-            sub_p = req_path[len("/tg-stream"):]
-        else:
-            sub_p = req_path[len("/tg_stream"):]
-        return await proxy_http_request(f"http://127.0.0.1:{TG_PORT}{sub_p}", request, default_prefix="/tg-stream")
-
-    # ── 4. Default Fallback ───────────────────────────────────────────────────
-    if request.method == "GET" and "html" in request.headers.get("accept", "").lower():
-        return await root_portal()
-    
-    return JSONResponse(content={"status": "error", "message": f"Route not found: {req_path}"}, status_code=404)
+    return JSONResponse(content={"status": "alive"}, status_code=200)
