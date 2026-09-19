@@ -90,8 +90,9 @@ def backup_to_vault() -> tuple[bool, str]:
 
     snapshot_path = os.path.join(DATA_DIR, "storage.sqlite.snapshot")
     try:
-        # Create a consistent online backup using SQLite Backup API
-        src_conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        # Create a consistent online backup using SQLite Backup API in read-only mode
+        # to avoid locking or colliding with active Node.js WAL transactions
+        src_conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=10.0)
         dst_conn = sqlite3.connect(snapshot_path)
         with dst_conn:
             src_conn.backup(dst_conn, pages=100)

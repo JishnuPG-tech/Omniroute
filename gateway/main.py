@@ -167,6 +167,18 @@ async def trigger_vault_backup():
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
+@app.get("/debug/omniroute/log")
+async def omniroute_log(lines: int = 150):
+    log_path = "/data/omniroute/omniroute.log"
+    if not os.path.exists(log_path):
+        return Response(content="No log file found at /data/omniroute/omniroute.log", media_type="text/plain")
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            all_lines = f.readlines()
+            return Response(content="".join(all_lines[-lines:]), media_type="text/plain")
+    except Exception as e:
+        return Response(content=f"Error reading log: {e}", media_type="text/plain")
+
 
 # ── Root Portal Route: Direct to OmniRoute Dashboard ─────────────────────────
 @app.get("/")

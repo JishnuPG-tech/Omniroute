@@ -90,4 +90,6 @@ def fix_rate_limits(root_dir="/omniroute"):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "/omniroute"
     fix_migrations(target)
-    fix_rate_limits(target)
+    # fix_rate_limits disabled: blind regex replacement across 91 bundle files
+    # corrupts Next.js and upstream API responses.
+

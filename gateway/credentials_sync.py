@@ -146,37 +146,48 @@ def handle_captured_credential(provider_hint: str, api_key: str):
     save_to_local_vault(env_name, api_key_str)
     sync_secret_to_huggingface(env_name, api_key_str)
 
+import threading
+
+_sync_timer = None
+_sync_lock = threading.Lock()
+
+def _debounced_vault_backup():
+    try:
+        from vault_sync import backup_to_vault
+        backup_to_vault()
+    except Exception as e:
+        logger.warning(f"[PERSISTENCE] Debounced vault backup failed: {e}")
+
+def schedule_vault_sync(delay_seconds: float = 15.0):
+    global _sync_timer
+    with _sync_lock:
+        if _sync_timer and _sync_timer.is_alive():
+            _sync_timer.cancel()
+        _sync_timer = threading.Timer(delay_seconds, _debounced_vault_backup)
+        _sync_timer.daemon = True
+        _sync_timer.start()
+
 def flush_omniroute_db():
-    """Flushes SQLite WAL buffer and syncs database to cloud vault."""
-    import sqlite3
+    """Safely inspects database in read-only mode and schedules debounced cloud backup."""
     db_path = os.path.join(os.environ.get("DATA_DIR", "/data/omniroute"), "storage.sqlite")
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
         return
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
-        conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
-        conn.close()
-
         sync_sqlite_credentials_to_vault(db_path)
-
-        # Trigger cloud vault sync
-        try:
-            from vault_sync import backup_to_vault
-            backup_to_vault()
-        except Exception:
-            pass
+        schedule_vault_sync(15.0)
     except Exception as e:
         logger.warning(f"[PERSISTENCE] flush_omniroute_db error: {e}")
 
 def sync_sqlite_credentials_to_vault(db_path=None):
-    """Scans OmniRoute SQLite database for any newly configured providers and syncs them."""
+    """Scans OmniRoute SQLite database in read-only mode for any newly configured providers and syncs them."""
     import sqlite3
     if not db_path:
         db_path = os.path.join(os.environ.get("DATA_DIR", "/data/omniroute"), "storage.sqlite")
     if not os.path.exists(db_path):
         return
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        # Open in read-only URI mode to prevent any WAL locking conflicts with Node.js
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = [t[0] for t in cursor.fetchall()]

@@ -447,6 +447,23 @@ while true; do
         echo "[CRITICAL] OmniRoute process died! Restarting..."
         (cd /omniroute && node server.js) > /data/omniroute/omniroute.log 2>&1 &
         OMNIROUTE_PID=$!
+        OMNIROUTE_FAIL_COUNT=0
+    elif [ -n "$OMNIROUTE_PID" ]; then
+        _STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:20128/api/monitoring/health" 2>/dev/null || echo "000")
+        if [ "$_STATUS" = "500" ] || [ "$_STATUS" = "000" ]; then
+            OMNIROUTE_FAIL_COUNT=$((OMNIROUTE_FAIL_COUNT + 1))
+            if [ "$OMNIROUTE_FAIL_COUNT" -ge 4 ]; then
+                echo "[SUPERVISOR] OmniRoute unhealthy (HTTP $_STATUS) for 40s. Performing clean self-healing restart..."
+                kill -TERM $OMNIROUTE_PID 2>/dev/null || true
+                sleep 2
+                kill -9 $OMNIROUTE_PID 2>/dev/null || true
+                (cd /omniroute && node server.js) > /data/omniroute/omniroute.log 2>&1 &
+                OMNIROUTE_PID=$!
+                OMNIROUTE_FAIL_COUNT=0
+            fi
+        else
+            OMNIROUTE_FAIL_COUNT=0
+        fi
     fi
 
     # Periodic clean SQLite backup routine every 3600 seconds (1 hour)
