@@ -34,18 +34,10 @@ log_info "INIT" "Setting up /data persistent volume directories..."
 mkdir -p /data/share/opencode /data/config/opencode /data/cache/opencode /data/state/opencode 2>/dev/null || true
 mkdir -p /root/.cache /data/cache 2>/dev/null || true
 
-# Fresh start for OmniRoute storage bucket data per plan
-FRESH_START_FLAG="/data/omniroute/.persistence_v1_ready"
-if [ ! -f "$FRESH_START_FLAG" ]; then
-    log_warn "RESET" "Fresh OmniRoute persistence plan requested. Purging legacy data from persistent storage..."
-    # Strictly remove legacy data from persistent bucket
-    rm -rf /data/omniroute /data/.omniroute /root/.omniroute /root/.cache/omniroute /data/jellyfin /data/hermes /root/.hermes /data/share 2>/dev/null || true
-    mkdir -p /data/omniroute/backups /data/omniroute/oauth /data/omniroute/credentials /data/omniroute/call_logs /data/omniroute/runtime 2>/dev/null || true
-    touch "$FRESH_START_FLAG"
-    log_info "RESET" "Fresh OmniRoute directory created at /data/omniroute. Legacy projects removed."
-fi
-
+# Ensure persistent volume directories exist (Never wipe user data on restarts)
 mkdir -p /data/omniroute/backups /data/omniroute/oauth /data/omniroute/credentials /data/omniroute/call_logs /data/omniroute/runtime 2>/dev/null || true
+# Clean only legacy non-OmniRoute directories if lingering
+rm -rf /data/jellyfin /data/hermes /root/.hermes /data/share 2>/dev/null || true
 chmod -R 777 /root/.cache /data/cache /data/omniroute 2>/dev/null || true
 
 # Playwright Browser Metadata Fix for gemini-web / browser providers
@@ -166,6 +158,14 @@ preflight_persistence_gate() {
     fi
     rm -f "$_PROBE" 2>/dev/null || true
 
+    # Cloud Vault Restore: check private HF dataset if local database is missing
+    if [ ! -f "$DATA_DIR/storage.sqlite" ] || [ ! -s "$DATA_DIR/storage.sqlite" ]; then
+        if [ -f "/vault_sync.py" ]; then
+            log_info "PREFLIGHT" "Local storage.sqlite absent; checking cloud vault for existing database snapshot..."
+            python3 /vault_sync.py restore || true
+        fi
+    fi
+
     # SQLite integrity check if database already exists
     if [ -f "$DATA_DIR/storage.sqlite" ] && [ -s "$DATA_DIR/storage.sqlite" ]; then
         if command -v sqlite3 >/dev/null 2>&1; then
@@ -180,6 +180,9 @@ preflight_persistence_gate() {
                         log_warn "PREFLIGHT" "Restoring database from verified last-known-good backup..."
                         cp -f "$DATA_DIR/backups/last-known-good.sqlite" "$DATA_DIR/storage.sqlite" 2>/dev/null || true
                     fi
+                elif [ -f "/vault_sync.py" ]; then
+                    log_warn "PREFLIGHT" "Attempting cloud vault restore as fallback..."
+                    python3 /vault_sync.py restore || true
                 fi
             fi
         fi
@@ -210,6 +213,10 @@ backup_omniroute_db() {
                     cp -f "$_BACKUP_FILE" "$_BDIR/last-known-good.sqlite" 2>/dev/null || true
                     ls -t "$_BDIR"/storage-*.sqlite 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
                     log_info "BACKUP" "Clean SQLite backup created: $_BACKUP_FILE"
+                    # Asynchronously sync verified snapshot to private cloud vault
+                    if [ -f "/vault_sync.py" ]; then
+                        python3 /vault_sync.py backup >/dev/null 2>&1 &
+                    fi
                 else
                     rm -f "$_BACKUP_FILE" 2>/dev/null || true
                     log_warn "BACKUP" "Backup failed integrity check; discarded."
@@ -233,6 +240,9 @@ shutdown_gracefully() {
     if [ -f "$DATA_DIR/storage.sqlite" ] && command -v sqlite3 >/dev/null 2>&1; then
         sqlite3 "$DATA_DIR/storage.sqlite" "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
         backup_omniroute_db >/dev/null 2>&1 || true
+        if [ -f "/vault_sync.py" ]; then
+            python3 /vault_sync.py backup >/dev/null 2>&1 || true
+        fi
     fi
     log_info "SHUTDOWN" "Persistence checkpoint complete. Container exiting."
     exit 0

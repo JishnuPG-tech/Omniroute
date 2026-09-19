@@ -102,7 +102,12 @@ def run_health_check_cycle():
     purge_old_backups()
     try:
         from gateway.credentials_sync import sync_sqlite_credentials_to_vault
-        sync_sqlite_credentials_to_vault("/root/.omniroute/storage.sqlite")
+        sync_sqlite_credentials_to_vault("/data/omniroute/storage.sqlite")
+    except Exception:
+        pass
+    try:
+        from vault_sync import backup_to_vault
+        backup_to_vault()
     except Exception:
         pass
 

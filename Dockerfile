@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 2. Install core Python runtime dependencies for Gateway
 RUN pip3 install --no-cache-dir \
-    aiohttp httpx uvicorn fastapi \
+    aiohttp httpx uvicorn fastapi huggingface_hub \
     --break-system-packages
 
 # 4. Copy prebuilt OmniRoute production runtime from Stage 1
@@ -57,9 +57,10 @@ COPY nginx.conf /nginx.conf
 COPY proxy.py /proxy.py
 COPY fix_omniroute.py /fix_omniroute.py
 COPY health_doctor.py /health_doctor.py
+COPY vault_sync.py /vault_sync.py
 COPY gateway /gateway
 COPY index.html /index.html
-RUN chmod +x /entrypoint.sh /fix_omniroute.py /health_doctor.py
+RUN chmod +x /entrypoint.sh /fix_omniroute.py /health_doctor.py /vault_sync.py
 
 EXPOSE 4096
 

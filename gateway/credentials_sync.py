@@ -147,41 +147,36 @@ def handle_captured_credential(provider_hint: str, api_key: str):
     sync_secret_to_huggingface(env_name, api_key_str)
 
 def flush_omniroute_db():
-    """Flushes SQLite WAL buffer and atomically syncs runtime db to persistent storage."""
+    """Flushes SQLite WAL buffer and syncs database to cloud vault."""
     import sqlite3
-    src = "/root/.omniroute/storage.sqlite"
-    dst = "/data/omniroute/storage.sqlite"
-    if not os.path.exists(src) or os.path.getsize(src) == 0:
+    db_path = os.path.join(os.environ.get("DATA_DIR", "/data/omniroute"), "storage.sqlite")
+    if not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
         return
     try:
-        os.makedirs("/data/omniroute", exist_ok=True)
-        conn = sqlite3.connect(src)
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-        conn.commit()
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
         conn.close()
 
-        tmp_dst = f"{dst}.tmp"
-        src_conn = sqlite3.connect(src)
-        dst_conn = sqlite3.connect(tmp_dst)
-        src_conn.backup(dst_conn)
-        src_conn.close()
-        dst_conn.close()
+        sync_sqlite_credentials_to_vault(db_path)
 
-        if os.path.exists(tmp_dst) and os.path.getsize(tmp_dst) > 0:
-            os.replace(tmp_dst, dst)
-            logger.info(f"[PERSISTENCE] Flushed {os.path.getsize(dst)} bytes to persistent volume ({dst})")
-
-        sync_sqlite_credentials_to_vault(src)
+        # Trigger cloud vault sync
+        try:
+            from vault_sync import backup_to_vault
+            backup_to_vault()
+        except Exception:
+            pass
     except Exception as e:
         logger.warning(f"[PERSISTENCE] flush_omniroute_db error: {e}")
 
-def sync_sqlite_credentials_to_vault(db_path="/root/.omniroute/storage.sqlite"):
+def sync_sqlite_credentials_to_vault(db_path=None):
     """Scans OmniRoute SQLite database for any newly configured providers and syncs them."""
     import sqlite3
+    if not db_path:
+        db_path = os.path.join(os.environ.get("DATA_DIR", "/data/omniroute"), "storage.sqlite")
     if not os.path.exists(db_path):
         return
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=5.0)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = [t[0] for t in cursor.fetchall()]
