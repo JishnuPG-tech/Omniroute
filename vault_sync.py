@@ -23,28 +23,32 @@ DB_PATH = os.path.join(DATA_DIR, "storage.sqlite")
 HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY")
 
 def get_hf_api():
-    if not HF_TOKEN:
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY")
+    if not token:
         logger.warning("HF_TOKEN is not set; cloud vault sync is disabled.")
-        return None
+        return None, "HF_TOKEN is not set in environment"
     try:
         from huggingface_hub import HfApi
-        return HfApi(token=HF_TOKEN)
-    except ImportError:
-        logger.error("huggingface_hub package is not installed.")
-        return None
+        return HfApi(token=token), None
+    except ImportError as exc:
+        logger.error(f"huggingface_hub import error: {exc}")
+        return None, f"huggingface_hub import error: {exc}"
 
-def restore_from_vault() -> bool:
+def restore_from_vault() -> tuple[bool, str]:
     """Restores storage.sqlite from private HF Dataset if local database is absent or empty."""
     os.makedirs(DATA_DIR, exist_ok=True)
     
     # If a valid local database already exists with positive size, keep local state as authoritative
     if os.path.exists(DB_PATH) and os.path.getsize(DB_PATH) > 0:
-        logger.info(f"Authoritative local database found at {DB_PATH} ({os.path.getsize(DB_PATH)} bytes).")
-        return True
+        msg = f"Authoritative local database found at {DB_PATH} ({os.path.getsize(DB_PATH)} bytes)."
+        logger.info(msg)
+        return True, msg
 
-    if not HF_TOKEN:
-        logger.info("No HF_TOKEN available to restore from cloud vault.")
-        return False
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY")
+    if not token:
+        msg = "No HF_TOKEN available to restore from cloud vault."
+        logger.info(msg)
+        return False, msg
 
     try:
         from huggingface_hub import hf_hub_download
@@ -53,7 +57,7 @@ def restore_from_vault() -> bool:
             repo_id=VAULT_REPO,
             filename="storage.sqlite",
             repo_type="dataset",
-            token=HF_TOKEN,
+            token=token,
             force_download=True
         )
         if downloaded and os.path.exists(downloaded) and os.path.getsize(downloaded) > 0:
@@ -63,22 +67,26 @@ def restore_from_vault() -> bool:
                 p = DB_PATH + ext
                 if os.path.exists(p):
                     os.remove(p)
-            logger.info(f"Successfully restored database from cloud vault ({os.path.getsize(DB_PATH)} bytes) to {DB_PATH}.")
-            return True
+            msg = f"Successfully restored database from cloud vault ({os.path.getsize(DB_PATH)} bytes) to {DB_PATH}."
+            logger.info(msg)
+            return True, msg
     except Exception as e:
-        logger.warning(f"No existing cloud vault snapshot found or restore failed: {e}")
+        msg = f"No existing cloud vault snapshot found or restore failed: {e}"
+        logger.warning(msg)
+        return False, msg
 
-    return False
+    return False, "Restore failed"
 
-def backup_to_vault() -> bool:
+def backup_to_vault() -> tuple[bool, str]:
     """Creates a consistent SQLite snapshot and uploads it to the private HF Dataset."""
     if not os.path.exists(DB_PATH) or os.path.getsize(DB_PATH) == 0:
-        logger.debug(f"Database at {DB_PATH} does not exist or is empty; skipping backup.")
-        return False
+        msg = f"Database at {DB_PATH} does not exist or is empty; skipping backup."
+        logger.debug(msg)
+        return False, msg
 
-    api = get_hf_api()
+    api, err = get_hf_api()
     if not api:
-        return False
+        return False, err
 
     snapshot_path = os.path.join(DATA_DIR, "storage.sqlite.snapshot")
     try:
@@ -98,10 +106,11 @@ def backup_to_vault() -> bool:
         check_conn.close()
 
         if not res or res[0] != "ok":
-            logger.error(f"Snapshot integrity check failed: {res}. Skipping upload.")
+            msg = f"Snapshot integrity check failed: {res}. Skipping upload."
+            logger.error(msg)
             if os.path.exists(snapshot_path):
                 os.remove(snapshot_path)
-            return False
+            return False, msg
 
         commit_msg = f"Automated OmniRoute storage checkpoint [{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}]"
         api.upload_file(
@@ -111,11 +120,13 @@ def backup_to_vault() -> bool:
             repo_type="dataset",
             commit_message=commit_msg
         )
-        logger.info(f"Database checkpoint ({os.path.getsize(snapshot_path)} bytes) synced to cloud vault {VAULT_REPO}.")
-        return True
+        msg = f"Database checkpoint ({os.path.getsize(snapshot_path)} bytes) synced to cloud vault {VAULT_REPO}."
+        logger.info(msg)
+        return True, msg
     except Exception as e:
-        logger.error(f"Failed to sync database to cloud vault: {e}")
-        return False
+        msg = f"Failed to sync database to cloud vault: {e}"
+        logger.error(msg)
+        return False, msg
     finally:
         if os.path.exists(snapshot_path):
             try:

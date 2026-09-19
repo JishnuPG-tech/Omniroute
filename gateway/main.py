@@ -158,8 +158,12 @@ async def persistence_status():
 async def trigger_vault_backup():
     try:
         from vault_sync import backup_to_vault
-        success = backup_to_vault()
-        return {"status": "ok" if success else "failed", "synced": success}
+        res = backup_to_vault()
+        if isinstance(res, tuple):
+            success, msg = res
+        else:
+            success, msg = bool(res), ""
+        return {"status": "ok" if success else "failed", "synced": success, "message": msg}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
