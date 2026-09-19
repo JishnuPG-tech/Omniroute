@@ -250,10 +250,13 @@ shutdown_gracefully() {
 
 trap shutdown_gracefully EXIT INT TERM
 
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+export TQDM_DISABLE=1
+
 # ── STEP 3: Start FastAPI Gateway Immediately ────────────────────────────────
 echo "[BOOT] FastAPI starting: $(get_elapsed)"
 cd /
-python3 -m uvicorn proxy:app --host 127.0.0.1 --port 8000 --workers 2 &
+python3 -m uvicorn proxy:app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log --log-level warning &
 FASTAPI_PID=$!
 
 # Step 4: Wait for FastAPI /health/live to return HTTP 200
@@ -433,7 +436,7 @@ BACKUP_TIMER=0
 while true; do
     if [ -n "$FASTAPI_PID" ] && ! kill -0 $FASTAPI_PID 2>/dev/null; then
         echo "[CRITICAL] FastAPI Gateway process died! Restarting..."
-        python3 -m uvicorn proxy:app --host 127.0.0.1 --port 8000 --workers 2 > /data/cache/fastapi_gateway.log 2>&1 &
+        python3 -m uvicorn proxy:app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log --log-level warning > /data/cache/fastapi_gateway.log 2>&1 &
         FASTAPI_PID=$!
     fi
 

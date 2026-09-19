@@ -24,6 +24,8 @@ def get_structured_logger(name: str) -> logging.Logger:
         handler.setFormatter(formatter)
         log.addHandler(handler)
         log.setLevel(logging.INFO)
+    for noisy in ("httpx", "httpcore", "urllib3", "huggingface_hub", "multipart"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     return log
 
 logger = get_structured_logger("GatewayUtils")

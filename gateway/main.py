@@ -279,7 +279,7 @@ async def route_catch_all(path: str, request: Request):
         or req_path in OMNIROUTE_EXACT
     ):
         if req_path != "/health/live":
-            logger.info(f"[ROUTER] {req_path} (referer={referer}) -> OmniRoute ({OMNIROUTE_PORT})")
+            logger.debug(f"[ROUTER] {req_path} (referer={referer}) -> OmniRoute ({OMNIROUTE_PORT})")
             res = await proxy_http_request(f"http://127.0.0.1:{OMNIROUTE_PORT}{req_path}", request, default_prefix="", extra_headers=extra)
             if res.status_code in (401, 403) and not req_path.startswith("/api/v1/auths"):
                 return JSONResponse(content={"status": "ok", "authenticated": False, "message": "unauthenticated"}, status_code=200)

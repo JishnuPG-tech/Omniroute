@@ -12,10 +12,13 @@ import sys
 import shutil
 import sqlite3
 import logging
-from datetime import datetime
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["TQDM_DISABLE"] = "1"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [VaultSync] %(message)s")
 logger = logging.getLogger("VaultSync")
+for noisy in ("httpx", "httpcore", "urllib3", "huggingface_hub"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 VAULT_REPO = os.environ.get("OMNIROUTE_VAULT_REPO", "Jishnupg/omniroute-storage-vault")
 DATA_DIR = os.environ.get("DATA_DIR", "/data/omniroute")
