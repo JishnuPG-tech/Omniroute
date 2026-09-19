@@ -16,6 +16,7 @@ import os
 import json
 import asyncio
 import logging
+from typing import Optional
 from fastapi import APIRouter, Request, Response, WebSocket
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from gateway.utils import proxy_http_request, proxy_websocket_stream, get_structured_logger
@@ -72,13 +73,26 @@ MASTER_KEY = (
     or "sk-6646a5f2024f6318-d27ff7-f3e152c8"
 )
 
-async def handle_omniroute_proxy(target: str, request: Request, default_prefix: str = "/omniroute", html_fixup=None):
+async def handle_omniroute_proxy(
+    target: str,
+    request: Request,
+    default_prefix: str = "/omniroute",
+    html_fixup=None,
+    body_override: Optional[bytes] = None,
+):
     extra_auth = {
         "Authorization": f"Bearer {MASTER_KEY}",
         "X-API-Key": MASTER_KEY,
         "api-key": MASTER_KEY,
     }
-    res = await proxy_http_request(target, request, default_prefix=default_prefix, extra_headers=extra_auth, html_fixup=html_fixup)
+    res = await proxy_http_request(
+        target,
+        request,
+        default_prefix=default_prefix,
+        extra_headers=extra_auth,
+        html_fixup=html_fixup,
+        body_override=body_override,
+    )
     if res.status_code in (401, 403) and ("dashboard" in request.url.path or "home" in request.url.path) and not request.url.path.startswith("/api/v1/auths"):
         return JSONResponse(content={"status": "ok", "authenticated": False, "message": "unauthenticated"}, status_code=200)
     if res.status_code in (500, 502, 503) and request.method == "GET" and "html" in request.headers.get("accept", "").lower():
