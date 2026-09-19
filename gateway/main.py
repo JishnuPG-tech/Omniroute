@@ -119,6 +119,50 @@ async def health_check():
             results[name] = {"status": "starting", "message": str(exc)}
     return {"gateway": "healthy", "upstreams": results}
 
+@app.get("/debug/persistence")
+async def persistence_status():
+    import sqlite3, glob
+    data_dir = os.environ.get("DATA_DIR", "/data/omniroute")
+    db_path = os.path.join(data_dir, "storage.sqlite")
+    
+    db_exists = os.path.exists(db_path)
+    db_size = os.path.getsize(db_path) if db_exists else 0
+    sqlite_ok = False
+    if db_exists and db_size > 0:
+        try:
+            conn = sqlite3.connect(db_path, timeout=2.0)
+            res = conn.execute("PRAGMA quick_check;").fetchone()
+            conn.close()
+            sqlite_ok = bool(res and res[0] == "ok")
+        except Exception:
+            sqlite_ok = False
+
+    backups = sorted(glob.glob(os.path.join(data_dir, "backups", "storage-*.sqlite")), reverse=True)
+    last_backup = os.path.basename(backups[0]) if backups else None
+
+    return {
+        "data_dir": data_dir,
+        "database_exists": db_exists,
+        "database_size_bytes": db_size,
+        "sqlite_healthy": sqlite_ok,
+        "encryption_configured": bool(os.environ.get("STORAGE_ENCRYPTION_KEY")),
+        "initial_password_set": bool(os.environ.get("INITIAL_PASSWORD")),
+        "cloud_vault_repo": os.environ.get("OMNIROUTE_VAULT_REPO", "Jishnupg/omniroute-storage-vault"),
+        "hf_token_configured": bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY")),
+        "local_backups_count": len(backups),
+        "latest_backup": last_backup
+    }
+
+@app.post("/debug/vault/backup")
+@app.get("/debug/vault/backup")
+async def trigger_vault_backup():
+    try:
+        from vault_sync import backup_to_vault
+        success = backup_to_vault()
+        return {"status": "ok" if success else "failed", "synced": success}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
 
 # ── Root Portal Route: Direct to OmniRoute Dashboard ─────────────────────────
 @app.get("/")
