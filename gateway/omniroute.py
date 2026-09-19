@@ -246,7 +246,8 @@ async def omniroute_oauth(request: Request, path: str = ""):
         asyncio.create_task(asyncio.to_thread(flush_omniroute_db))
     return res
 
-# ── OpenAI API Endpoint Routing (20128) ─────────────────────────────────────
+# ── OpenAI & Anthropic Messages API Endpoint Routing (20128) ────────────────
+@router.api_route("/messages", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/v1", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/v1/chat/completions", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
@@ -254,12 +255,31 @@ async def omniroute_oauth(request: Request, path: str = ""):
 @router.api_route("/api/v1/embeddings", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 @router.api_route("/api/v1/completions", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def omniroute_v1_api(request: Request, path: str = ""):
+    if not path and request.url.path.endswith("/messages"):
+        path = "messages"
     if path in ("openapi.json", "openapi.json/"):
         return JSONResponse({
             "openapi": "3.0.0",
             "info": {"title": "OmniRoute AI Gateway API", "version": "1.0.0"},
             "paths": {}
         })
+    if path == "messages" or path.endswith("messages"):
+        target = f"http://127.0.0.1:{OMNIROUTE_PORT}/v1/messages"
+        req_body = None
+        try:
+            raw_body = await request.body()
+            if raw_body:
+                req_body = json.loads(raw_body.decode('utf-8'))
+        except Exception:
+            pass
+
+        if isinstance(req_body, dict):
+            req_model = str(req_body.get("model") or "")
+            if req_model.startswith("claude-") or not req_model or req_model == "default":
+                req_body["model"] = "auto/smart"
+                new_body_bytes = json.dumps(req_body).encode('utf-8')
+                return await handle_omniroute_proxy(target, request, default_prefix="/omniroute", body_override=new_body_bytes)
+        return await handle_omniroute_proxy(target, request, default_prefix="/omniroute")
     if path == "models" and request.method == "GET":
         target = f"http://127.0.0.1:{OMNIROUTE_PORT}/v1/models"
         try:

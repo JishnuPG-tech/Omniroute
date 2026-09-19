@@ -243,6 +243,8 @@ async def route_catch_all(path: str, request: Request):
         "/api/cloud-",
         "/api/arena",
         "/api/pricing",
+        "/messages",
+        "/v1",
     )
 
     OMNIROUTE_EXACT = (
